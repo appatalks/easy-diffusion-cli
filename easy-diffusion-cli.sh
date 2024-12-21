@@ -7,7 +7,6 @@ usage() {
   echo " Optional arguments:"
   echo "       [--init-image \"/path/to/image\"]" 
   echo "       [--seed SEED]"
-  echo "       [--used-random-seed true/false]" 
   echo "       [--negative-prompt \"Negative prompt\"]"
   echo "       [--num-inference-steps STEPS]" 
   echo "       [--guidance-scale SCALE] (Higher the number, more weight to prompt)"
@@ -20,8 +19,7 @@ usage() {
 }
 
 # Default values for optional parameters
-SEED=33658339
-USED_RANDOM_SEED=true
+SEED=$(od -An -N8 -t u8 /dev/urandom)
 NEGATIVE_PROMPT=""
 NUM_INFERENCE_STEPS=46
 GUIDANCE_SCALE=7.5
@@ -41,7 +39,6 @@ while [[ "$#" -gt 0 ]]; do
     --prompt) PROMPT="$2"; shift ;;
     --init-image) INIT_IMAGE_PATH="$2"; shift ;;
     --seed) SEED="$2"; shift ;;
-    --used-random-seed) USED_RANDOM_SEED="$2"; shift ;;
     --negative-prompt) NEGATIVE_PROMPT="$2"; shift ;;
     --num-inference-steps) NUM_INFERENCE_STEPS="$2"; shift ;;
     --guidance-scale) GUIDANCE_SCALE="$2"; shift ;;
@@ -86,7 +83,6 @@ if [[ -n "$INIT_IMAGE" ]]; then
 {
   "prompt": "$PROMPT",
   "seed": $SEED,
-  "used_random_seed": $USED_RANDOM_SEED,
   "negative_prompt": "$NEGATIVE_PROMPT",
   "num_outputs": 1,
   "num_inference_steps": $NUM_INFERENCE_STEPS,
@@ -124,7 +120,6 @@ else
 {
   "prompt": "$PROMPT",
   "seed": $SEED,
-  "used_random_seed": $USED_RANDOM_SEED,
   "negative_prompt": "$NEGATIVE_PROMPT",
   "num_outputs": 1,
   "num_inference_steps": $NUM_INFERENCE_STEPS,
