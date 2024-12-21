@@ -5,6 +5,7 @@ usage() {
   echo "Usage: $0 --prompt \"Your prompt here\"" 
   echo ""
   echo " Optional arguments:"
+  echo "       [--model MODEL]"
   echo "       [--init-image \"/path/to/image\"]" 
   echo "       [--seed SEED]"
   echo "       [--negative-prompt \"Negative prompt\"]"
@@ -19,14 +20,15 @@ usage() {
 }
 
 # Default values for optional parameters
+MODEL="sd-v1-4"
 SEED=$(od -An -N4 -t u4 /dev/urandom)
 NEGATIVE_PROMPT=""
 NUM_INFERENCE_STEPS=46
 GUIDANCE_SCALE=7.5
 PROMPT_STRENGTH=0.5
 WIDTH=512
-HEIGHT=768
-SAVE_TO_DISK_PATH="cli-image-output"
+HEIGHT=512
+SAVE_TO_DISK_PATH="/home/easy-diffusion-out/"
 SESSION_ID=$(date '+%Y-%m-%d')
 
 # Initialize optional variables
@@ -37,6 +39,7 @@ INIT_IMAGE_PATH=""
 while [[ "$#" -gt 0 ]]; do
   case $1 in
     --prompt) PROMPT="$2"; shift ;;
+    --model) MODEL="$2"; shift ;;
     --init-image) INIT_IMAGE_PATH="$2"; shift ;;
     --seed) SEED="$2"; shift ;;
     --negative-prompt) NEGATIVE_PROMPT="$2"; shift ;;
@@ -92,7 +95,7 @@ if [[ -n "$INIT_IMAGE" ]]; then
   "height": $HEIGHT,
   "vram_usage_level": "balanced",
   "sampler_name": "euler_a",
-  "use_stable_diffusion_model": "sd-v1-4",
+  "use_stable_diffusion_model": "$MODEL",
   "clip_skip": false,
   "use_vae_model": "vae-ft-mse-840000-ema-pruned",
   "stream_progress_updates": true,
@@ -129,7 +132,7 @@ else
   "height": $HEIGHT,
   "vram_usage_level": "balanced",
   "sampler_name": "euler_a",
-  "use_stable_diffusion_model": "sd-v1-4",
+  "use_stable_diffusion_model": "$MODEL",
   "clip_skip": false,
   "use_vae_model": "vae-ft-mse-840000-ema-pruned",
   "stream_progress_updates": true,
