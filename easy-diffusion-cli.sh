@@ -19,7 +19,7 @@ usage() {
 }
 
 # Default values for optional parameters
-SEED=$(od -An -N8 -t u8 /dev/urandom)
+SEED=$(od -An -N4 -t u4 /dev/urandom)
 NEGATIVE_PROMPT=""
 NUM_INFERENCE_STEPS=46
 GUIDANCE_SCALE=7.5
