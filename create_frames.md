@@ -17,18 +17,18 @@ This command will create JPEG files for each frame of the video in the current d
 
 ----
 
+
 You can use `ffmpeg` to combine a series of images back into a video file. Here's how to do it:
 
 1. **Make sure your images are named in a sequential order** (e.g., `frame_0001.jpg`, `frame_0002.jpg`, etc.).
 
 2. **Use the following `ffmpeg` command** to create a video from the images:
 
-   ```bash
-   ffmpeg -framerate 30 -i frame_%04d.jpg -c:v libx264 -pix_fmt yuv420p output_video.mp4
-   ```
+```bash
+ls -1U frame_*.jpg | awk '{print "file \x27" $0 "\x27"}' > filelist.txt
+ffmpeg -f concat -safe 0 -i filelist.txt -c:v libx264 -pix_fmt yuv420p output_video.mp4
+```
 
-   - `-framerate 30`: Sets the frame rate for the output video (you can adjust this number as needed).
-   - `-i frame_%04d.jpg`: Specifies the input image pattern.
    - `-c:v libx264`: Uses the H.264 codec for video encoding.
    - `-pix_fmt yuv420p`: Sets the pixel format for better compatibility with players.
    - `output_video.mp4`: The name of the output video file.
