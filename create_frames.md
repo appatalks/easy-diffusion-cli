@@ -25,8 +25,15 @@ You can use `ffmpeg` to combine a series of images back into a video file. Here'
 2. **Use the following `ffmpeg` command** to create a video from the images:
 
 ```bash
-ls -1U frame_*.jpg | awk '{print "file \x27" $0 "\x27"}' > filelist.txt
-ffmpeg -f concat -safe 0 -i filelist.txt -c:v libx264 -pix_fmt yuv420p output_video.mp4
+   a=1
+   for i in $(ls -1tr *.jpeg); do
+       mv "$i" "frame_$(printf "%04d" $a).jpeg"
+       a=$((a + 1))
+   done
+```
+
+```bash
+ffmpeg -framerate 30 -i frame_%04d.jpeg -c:v libx264 -pix_fmt yuv420p output_video.mp4
 ```
 
    - `-c:v libx264`: Uses the H.264 codec for video encoding.
