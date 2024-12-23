@@ -23,14 +23,6 @@ CLI for Easy-Diffusion
     ```
 3. Examples
 
-#### Original 
-
-https://github.com/user-attachments/assets/700045f5-e9d4-47f6-b4bd-a2f8969b6377
-
-#### Processed Run Example
-
-placeholer
-
 ### Syntax
 
 ```bash
