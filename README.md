@@ -27,13 +27,9 @@ CLI for Easy-Diffusion
 
 https://github.com/user-attachments/assets/700045f5-e9d4-47f6-b4bd-a2f8969b6377
 
-#### Processed Run Example 1 (scaled to 512x512)
+#### Processed Run Example
 
-https://github.com/user-attachments/assets/c480f4da-46bd-4713-a566-9f7d595c9401
-
-#### Processed Run Example 2 (scaled to 512x512)
-
-https://github.com/user-attachments/assets/c9677e6d-d196-45b6-9dd4-3b89230c0aa7
+placeholer
 
 ### Syntax
 
