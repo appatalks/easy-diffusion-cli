@@ -11,17 +11,9 @@ Transform videos using AI diffusion with intelligent GPU+CPU load balancing, aut
 # Basic video transformation with auto-optimization
 ./video-diffusion.sh --video "input.mp4" --prompt "watercolor painting"
 
-# Hybrid GPU+CPU processing for maximum speed
-./video-diffusion.sh --video "input.mp4" --prompt "cyberpunk city neon lights" \
-  --hybrid-processing
-
 # Professional quality with temporal smoothing
 ./video-diffusion.sh --video "input.mp4" --prompt "Van Gogh starry night style" \
   --smoothing init --smoothing-strength 0.4
-
-# High-end system with all optimizations
-./video-diffusion.sh --video "input.mp4" --prompt "anime style artwork" \
-  --hybrid-processing --smoothing temporal --smoothing-strength 0.3
 ```
 
 ### ⚡ Hybrid Processing Modes
