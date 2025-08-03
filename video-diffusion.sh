@@ -43,11 +43,13 @@ usage() {
   echo "  temporal - Apply temporal filtering using neighboring frames"
   echo "  none     - No smoothing (default)"
   echo ""
-  echo "Output video will be named using first 3 words of prompt + timestamp (e.g., van_gogh_starry_2025-08-02_2046.mp4)"
+  echo "Output video naming: prompt_words_[options]_YYYY-MM-DD_HHMM.mp4"
+  echo "Option flags: i=init, o=optical, t=temporal, s=sequential, d=debug, h=high-concurrency"
+  echo "Examples: van_gogh_starry_i_2025-08-02_2046.mp4, cyberpunk_city_oth_2025-08-02_2046.mp4"
   exit 1
 }
 
-# Function to generate video filename from first 3 prompt words and timestamp
+# Function to generate video filename from first 3 prompt words, options, and timestamp
 generate_video_name() {
   local prompt="$1"
   local timestamp=$(date '+%Y-%m-%d_%H%M')
@@ -60,7 +62,39 @@ generate_video_name() {
     first_three_words="generated"
   fi
   
-  echo "${first_three_words}_${timestamp}.mp4"
+  # Generate option flags string based on active settings
+  local option_flags=""
+  
+  # Add smoothing method flag
+  if [[ "$SMOOTHING" != "none" ]]; then
+    case "$SMOOTHING" in
+      "init") option_flags="${option_flags}i" ;;
+      "optical") option_flags="${option_flags}o" ;;
+      "temporal") option_flags="${option_flags}t" ;;
+    esac
+  fi
+  
+  # Add sequential processing flag
+  if [[ "$SEQUENTIAL" == true ]]; then
+    option_flags="${option_flags}s"
+  fi
+  
+  # Add debug flag
+  if [[ "$DEBUG" == true ]]; then
+    option_flags="${option_flags}d"
+  fi
+  
+  # Add high concurrency flag (if above default)
+  if [[ $MAX_CONCURRENT_REQUESTS -gt 12 ]]; then
+    option_flags="${option_flags}h"
+  fi
+  
+  # Build filename with options
+  if [[ -n "$option_flags" ]]; then
+    echo "${first_three_words}_${option_flags}_${timestamp}.mp4"
+  else
+    echo "${first_three_words}_${timestamp}.mp4"
+  fi
 }
 
 # Temporal smoothing functions for reducing frame-to-frame inconsistency
