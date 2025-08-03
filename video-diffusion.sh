@@ -3,8 +3,49 @@
 # Video Diffusion CLI - Optimized for modern hardware with parallel processing
 # This script extracts frames from a video and processes each frame through Easy Diffusion in parallel
 
+# Initialize logging
+LOG_FILE="./video_diffusion.log"
+SESSION_START_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+
+# Logging functions
+log_info() {
+  local message="$1"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] $message" | tee -a "$LOG_FILE"
+}
+
+log_debug() {
+  local message="$1"
+  if [[ "$DEBUG" == "true" ]]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [DEBUG] $message" | tee -a "$LOG_FILE"
+  else
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [DEBUG] $message" >> "$LOG_FILE"
+  fi
+}
+
+log_error() {
+  local message="$1"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $message" | tee -a "$LOG_FILE" >&2
+}
+
+log_warning() {
+  local message="$1"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [WARNING] $message" | tee -a "$LOG_FILE"
+}
+
+# Initialize log file
+echo "================== Video Diffusion Processing Session ==================" > "$LOG_FILE"
+echo "Session started: $SESSION_START_TIME" >> "$LOG_FILE"
+echo "Command: $0 $*" >> "$LOG_FILE"
+echo "Working directory: $(pwd)" >> "$LOG_FILE"
+echo "=======================================================================" >> "$LOG_FILE"
+echo "" >> "$LOG_FILE"
+
+log_info "Video diffusion processing started"
+log_info "Log file: $LOG_FILE"
+
 # Function to display usage instructions
 usage() {
+  log_info "Usage information requested"
   echo "Usage: $0 --video \"/path/to/video.mp4\" --prompt \"Your prompt here\""
   echo ""
   echo "Required arguments:"
@@ -66,6 +107,7 @@ usage() {
   echo "  $0 --video \"input.mp4\" --prompt \"Van Gogh style\" --smoothing temporal --smoothing-strength 0.4"
   echo ""
   echo "Output video will be named using first 3 words of prompt + timestamp (e.g., van_gogh_starry_2025-08-03_0130.mp4)"
+  log_info "Usage information displayed, exiting"
   exit 1
 }
 
@@ -82,7 +124,9 @@ generate_video_name() {
     first_three_words="generated"
   fi
   
-  echo "${first_three_words}_${timestamp}.mp4"
+  local video_name="${first_three_words}_${timestamp}.mp4"
+  log_debug "Generated video filename: $video_name (from prompt: '$prompt')"
+  echo "$video_name"
 }
 
 # Temporal smoothing functions for reducing frame-to-frame inconsistency
@@ -93,6 +137,7 @@ apply_optical_flow_smoothing() {
   local smoothing_strength="$2"
   local temp_smooth_dir="${output_dir}/temp_smooth"
   
+  log_info "Applying optical flow smoothing (strength: $smoothing_strength)"
   echo "Applying optical flow smoothing (strength: $smoothing_strength)..."
   mkdir -p "$temp_smooth_dir"
   
@@ -504,22 +549,30 @@ done
 
 # Validate mandatory arguments
 if [[ -z "$VIDEO_PATH" ]]; then
+  log_error "Video path is required but not provided"
   echo "Error: --video is required."
   echo ""
   usage
 fi
 
 if [[ -z "$PROMPT" ]]; then
+  log_error "Prompt is required but not provided"
   echo "Error: --prompt is required."
   echo ""
   usage
 fi
 
+log_info "Video file: $VIDEO_PATH"
+log_info "Prompt: $PROMPT"
+log_info "Smoothing: $SMOOTHING (strength: $SMOOTHING_STRENGTH)"
+
 # Validate smoothing parameters
 case "$SMOOTHING" in
   "none"|"init"|"optical"|"temporal")
+    log_debug "Valid smoothing method: $SMOOTHING"
     ;;
   *)
+    log_error "Invalid smoothing method '$SMOOTHING'. Valid options: none, init, optical, temporal"
     echo "Error: Invalid smoothing method '$SMOOTHING'. Valid options: none, init, optical, temporal"
     exit 1
     ;;
@@ -527,18 +580,25 @@ esac
 
 # Validate smoothing strength
 if ! [[ "$SMOOTHING_STRENGTH" =~ ^[0-9]*\.?[0-9]+$ ]] || (( $(echo "$SMOOTHING_STRENGTH < 0.0" | bc -l) )) || (( $(echo "$SMOOTHING_STRENGTH > 1.0" | bc -l) )); then
+  log_error "Invalid smoothing strength: $SMOOTHING_STRENGTH (must be 0.0-1.0)"
   echo "Error: Smoothing strength must be between 0.0 and 1.0, got: $SMOOTHING_STRENGTH"
   exit 1
 fi
 
+log_debug "Smoothing strength validated: $SMOOTHING_STRENGTH"
+
 # Check if video file exists
 if [[ ! -f "$VIDEO_PATH" ]]; then
+  log_error "Video file not found at '$VIDEO_PATH'"
   echo "Error: Video file not found at '$VIDEO_PATH'"
   exit 1
 fi
 
+log_info "Video file validation successful"
+
 # Auto-detect source video frame rate if FPS is still default
 if [[ "$FPS" == "1" ]]; then
+  log_info "Auto-detecting source video frame rate"
   echo "Detecting source video frame rate..."
   SOURCE_FPS=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 "$VIDEO_PATH" 2>/dev/null)
   if [[ -n "$SOURCE_FPS" && "$SOURCE_FPS" != "0/0" ]]; then
@@ -548,8 +608,11 @@ if [[ "$FPS" == "1" ]]; then
       DENOMINATOR=${BASH_REMATCH[2]}
       DETECTED_FPS=$(( (NUMERATOR + DENOMINATOR/2) / DENOMINATOR ))  # Round to nearest integer
       
+      log_debug "Source FPS detection: $SOURCE_FPS -> $DETECTED_FPS fps"
+      
       if [[ "$DETECTED_FPS" -gt 0 && "$DETECTED_FPS" -le 120 ]]; then
         FPS=$DETECTED_FPS
+        log_info "Auto-detected frame rate: $FPS fps (from $SOURCE_FPS)"
         echo "✓ Auto-detected source frame rate: $FPS fps (from $SOURCE_FPS)"
         
         # Calculate total frames that would be processed
@@ -558,6 +621,7 @@ if [[ "$FPS" == "1" ]]; then
           # Convert duration to integer seconds (round up)
           DURATION_INT=$(echo "$DURATION" | cut -d. -f1)
           TOTAL_FRAMES=$((DURATION_INT * FPS + FPS))  # Add one extra second worth for safety
+          log_info "Estimated total frames to process: $TOTAL_FRAMES (duration: ${DURATION}s, fps: $FPS)"
           echo "  This will extract approximately $TOTAL_FRAMES frames from the video"
           
           # Provide recommendations based on frame count
@@ -707,22 +771,27 @@ if [[ $total_servers -eq 0 ]]; then
 fi
 
 echo "Total available servers: $total_servers (GPU: $available_gpu_servers, CPU: $available_cpu_servers)"
+log_info "Server availability check complete: $total_servers total ($available_gpu_servers GPU, $available_cpu_servers CPU)"
 echo ""
 
 # Extract frames from video with parallel processing
+log_info "Starting frame extraction with $PARALLEL_JOBS parallel jobs"
 echo "Extracting frames from video (using $PARALLEL_JOBS parallel jobs)..."
-ffmpeg -i "$VIDEO_PATH" -vf "fps=$FPS" "$TEMP_DIR/frame_%04d.jpg" -threads $PARALLEL_JOBS -y
+ffmpeg -i "$VIDEO_PATH" -vf "fps=$FPS" "$TEMP_DIR/frame_%04d.jpg" -threads $PARALLEL_JOBS -y 2>> "$LOG_FILE"
 
 if [[ $? -ne 0 ]]; then
+  log_error "Failed to extract frames from video"
   echo "Error: Failed to extract frames from video"
   exit 1
 fi
 
 # Count extracted frames
 FRAME_COUNT=$(ls -1 "$TEMP_DIR"/frame_*.jpg 2>/dev/null | wc -l)
+log_info "Frame extraction complete: $FRAME_COUNT frames extracted"
 echo "Extracted $FRAME_COUNT frames"
 
 if [[ $FRAME_COUNT -eq 0 ]]; then
+  log_error "No frames were extracted from video"
   echo "Error: No frames were extracted"
   exit 1
 fi
@@ -731,6 +800,8 @@ fi
 if [[ -z "$END_FRAME" ]]; then
   END_FRAME=$FRAME_COUNT
 fi
+
+log_debug "Processing range: frames $START_FRAME to $END_FRAME"
 
 # Validate frame range
 if [[ $START_FRAME -gt $FRAME_COUNT ]]; then
@@ -752,9 +823,12 @@ process_frame() {
   local frame_file=$(printf "$TEMP_DIR/frame_%04d.jpg" $frame_num)
   
   if [[ ! -f "$frame_file" ]]; then
+    log_warning "Frame file $frame_file not found, skipping frame $frame_num"
     echo "Warning: Frame file $frame_file not found, skipping..."
     return 1
   fi
+
+  log_debug "Processing frame $frame_num: $frame_file"
 
   # Determine init image based on smoothing method
   local init_image="$frame_file"
@@ -770,11 +844,13 @@ process_frame() {
       init_image="$prev_generated_file"
       # Adjust prompt strength for smoother transitions
       prompt_strength_adjusted=$(echo "$PROMPT_STRENGTH * (1.0 - $SMOOTHING_STRENGTH)" | bc -l)
+      log_debug "Init smoothing: Using previous frame $prev_frame_num as init (strength: $prompt_strength_adjusted)"
       echo "✓ Init smoothing: Using previous frame $prev_frame_num as init (strength: $prompt_strength_adjusted)"
       if [[ "$DEBUG" == true ]]; then
         echo "DEBUG: Init image: $prev_generated_file"
       fi
     else
+      log_warning "Previous generated frame not found for frame $frame_num, using original frame"
       echo "⚠️  Previous generated frame not found, using original frame"
       if [[ "$DEBUG" == true ]]; then
         echo "DEBUG: Expected pattern: $prev_generated_pattern"
@@ -1187,16 +1263,20 @@ echo "Total frames processed: $PROCESSED_COUNT out of $TOTAL_TO_PROCESS"
 if [[ ${#FAILED_FRAMES[@]} -gt 0 ]]; then
   echo "Failed frames: ${#FAILED_FRAMES[@]} (see warnings above)"
 fi
+log_info "Processing completed successfully - output directory: $SAVE_TO_DISK_PATH"
 echo "Output directory: $SAVE_TO_DISK_PATH"
 
 # Clean up temporary frames unless user wants to keep them
 if [[ "$KEEP_FRAMES" == false ]]; then
+  log_info "Cleaning up temporary frames directory: $TEMP_DIR"
   echo "Cleaning up temporary frames..."
   rm -rf "$TEMP_DIR"
 else
+  log_info "Temporary frames preserved at: $TEMP_DIR"
   echo "Temporary frames kept in: $TEMP_DIR"
 fi
 
+log_info "Video diffusion processing session completed"
 echo "Video diffusion processing completed!"
 
 # Automatically create video from generated images unless --no-video flag is used
@@ -1334,8 +1414,19 @@ if [[ "$NO_VIDEO" == false ]]; then
   else
     echo "✗ Failed to create video"
     echo "Generated images preserved in: $SAVE_TO_DISK_PATH"
+    log_error "Video creation failed"
   fi
 else
+  log_info "Video creation skipped (--no-video flag used)"
   echo "Video creation skipped (--no-video flag used)"
   echo "Generated images preserved in: $SAVE_TO_DISK_PATH"
 fi
+
+# Final log entry
+echo "" >> "$LOG_FILE"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] Video diffusion processing session ended" >> "$LOG_FILE"
+echo "Session duration: $(($(date +%s) - $(date -d "$SESSION_START_TIME" +%s))) seconds" >> "$LOG_FILE"
+echo "Log file saved: $LOG_FILE" >> "$LOG_FILE"
+echo "=======================================================================" >> "$LOG_FILE"
+
+log_info "Log file saved: $LOG_FILE"
