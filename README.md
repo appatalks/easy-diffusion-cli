@@ -9,9 +9,13 @@ For maximum-speed video processing with aggressive parallel optimization and fra
 # Auto-optimized mode with smoothing (recommended)
 ./video-diffusion.sh --video "/path/to/video.mp4" --prompt "Your transformation prompt" --smoothing init
 
-# Ultra-high-performance mode with temporal smoothing
+# Ultra-high-performance mode with init smoothing
 ./video-diffusion.sh --video "/path/to/video.mp4" --prompt "Your prompt" \
   --max-concurrent 20 --batch-size 40 --delay 0.02 --fps 3 --smoothing init --smoothing-strength 0.4
+
+# Temporal smoothing for maximum frame consistency
+./video-diffusion.sh --video "/path/to/video.mp4" --prompt "Your prompt" \
+  --smoothing temporal --smoothing-strength 0.5
 
 # Advanced smoothing for motion-heavy videos
 ./video-diffusion.sh --video "/path/to/video.mp4" --prompt "flowing water" \
