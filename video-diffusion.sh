@@ -50,19 +50,19 @@ usage() {
   echo "       [--debug] (enable comprehensive debug output)"
   echo ""
   echo "🎯 Smoothing Methods:"
-  echo "  init     - Use previous generated frame as init image (best quality/speed)"
-  echo "  optical  - Apply optical flow-based frame blending (motion-heavy content)"
-  echo "  temporal - Apply temporal filtering using neighboring frames (maximum consistency)"
-  echo "  none     - No smoothing (fastest, may flicker)"
+  echo "  init     - Use previous generated frame as init image (best quality/speed, forces sequential)"
+  echo "  optical  - Apply optical flow-based frame blending (motion-heavy content, allows parallel)"
+  echo "  temporal - Apply temporal filtering using neighboring frames (maximum consistency, allows parallel)"
+  echo "  none     - No smoothing (fastest, may flicker, allows parallel)"
   echo ""
   echo "📋 Examples:"
   echo "  # Basic usage with auto-optimization"
   echo "  $0 --video \"input.mp4\" --prompt \"watercolor painting\""
   echo ""
-  echo "  # Hybrid GPU+CPU processing with smoothing"
+  echo "  # Hybrid GPU+CPU processing with init smoothing (sequential for quality)"
   echo "  $0 --video \"input.mp4\" --prompt \"cyberpunk city\" --hybrid-processing --smoothing init"
   echo ""
-  echo "  # High-quality with temporal smoothing"
+  echo "  # High-quality with temporal smoothing (parallel processing enabled)"
   echo "  $0 --video \"input.mp4\" --prompt \"Van Gogh style\" --smoothing temporal --smoothing-strength 0.4"
   echo ""
   echo "Output video will be named using first 3 words of prompt + timestamp (e.g., van_gogh_starry_2025-08-03_0130.mp4)"
@@ -770,9 +770,16 @@ process_frame() {
       init_image="$prev_generated_file"
       # Adjust prompt strength for smoother transitions
       prompt_strength_adjusted=$(echo "$PROMPT_STRENGTH * (1.0 - $SMOOTHING_STRENGTH)" | bc -l)
-      echo "Using init smoothing: previous frame -> current (strength: $prompt_strength_adjusted)"
+      echo "✓ Init smoothing: Using previous frame $prev_frame_num as init (strength: $prompt_strength_adjusted)"
+      if [[ "$DEBUG" == true ]]; then
+        echo "DEBUG: Init image: $prev_generated_file"
+      fi
     else
-      echo "Warning: Previous generated frame not found, using original frame"
+      echo "⚠️  Previous generated frame not found, using original frame"
+      if [[ "$DEBUG" == true ]]; then
+        echo "DEBUG: Expected pattern: $prev_generated_pattern"
+        echo "DEBUG: Available files: $(ls "$SAVE_TO_DISK_PATH"/*frame_* 2>/dev/null | head -3)"
+      fi
     fi
   fi
 
@@ -953,10 +960,19 @@ fi
 trap cleanup_server_tracking EXIT
 
 # Process frames in parallel or sequential mode
-if [[ "$SEQUENTIAL" == true ]]; then
+# Force sequential processing for init smoothing to ensure frame dependencies
+if [[ "$SEQUENTIAL" == true ]] || [[ "$SMOOTHING" == "init" ]]; then
+  if [[ "$SMOOTHING" == "init" ]] && [[ "$SEQUENTIAL" != true ]]; then
+    echo "⚠️  Init smoothing detected: Switching to sequential processing for frame dependencies"
+    echo "   This ensures each frame uses the previously generated frame as init image"
+    echo "   For parallel processing, consider using --smoothing optical or --smoothing temporal"
+    echo ""
+  fi
+  
   # Sequential processing
   PROCESSED_COUNT=0
   for ((i=START_FRAME; i<=END_FRAME; i++)); do
+    echo "Processing frame $i/$END_FRAME sequentially..."
     if process_frame $i; then
       ((PROCESSED_COUNT++))
     fi

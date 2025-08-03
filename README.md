@@ -90,15 +90,17 @@ Transform videos using AI diffusion with intelligent GPU+CPU load balancing, aut
 ## 🎨 Smoothing Methods
 
 **🎯 Recommended for Most Use Cases:**
-- `--smoothing init`: Use previous generated frame as init image (reduces flicker)
+- `--smoothing init`: Use previous generated frame as init image (reduces flicker, forces sequential processing)
 
-**🌊 For Motion-Heavy Content:**
+**🌊 For Motion-Heavy Content with Parallel Processing:**
 - `--smoothing optical`: Optical flow-based frame blending
 - `--smoothing temporal`: Temporal filtering using neighboring frames
 
 **⚙️ Advanced Options:**
 - `--smoothing none`: No smoothing (fastest, but may flicker)
 - `--smoothing-strength 0.0-1.0`: Adjust smoothing intensity (default: 0.3)
+
+**⚠️ Important:** Init smoothing automatically switches to sequential processing to ensure frame dependencies. For maximum speed with multiple GPU servers, use `optical` or `temporal` smoothing methods.
 
 ## 🎮 Complete Command Reference
 
@@ -150,12 +152,14 @@ Required arguments:
 
 ### 🎯 Smoothing Methods Explained
 
-| Method | Description | Best For | Performance |
-|--------|-------------|----------|-------------|
-| **init** | Uses previous generated frame as init image | General use, best balance | ⭐⭐⭐⭐⭐ |
-| **optical** | Optical flow-based frame blending | Motion-heavy content | ⭐⭐⭐⭐ |
-| **temporal** | Multi-frame temporal filtering | Maximum consistency | ⭐⭐⭐ |
-| **none** | No smoothing (fastest) | Testing, speed priority | ⭐⭐⭐⭐⭐ |
+| Method | Description | Best For | Performance | Processing |
+|--------|-------------|----------|-------------|------------|
+| **init** | Uses previous generated frame as init image | General use, best balance | ⭐⭐⭐⭐⭐ | Sequential* |
+| **optical** | Optical flow-based frame blending | Motion-heavy content | ⭐⭐⭐⭐ | Parallel |
+| **temporal** | Multi-frame temporal filtering | Maximum consistency | ⭐⭐⭐ | Parallel |
+| **none** | No smoothing (fastest) | Testing, speed priority | ⭐⭐⭐⭐⭐ | Parallel |
+
+**\*Init smoothing automatically switches to sequential processing** to ensure each frame uses the previously generated frame as initialization. This provides the best quality and consistency but processes one frame at a time.
 ## 🚀 Quick Start Examples
 
 ### **Basic Usage**
