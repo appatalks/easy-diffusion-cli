@@ -113,10 +113,17 @@ apply_optical_flow_smoothing() {
     local curr_frame="${images[$i]}"
     local output_frame="$temp_smooth_dir/$(basename "$curr_frame")"
     
-    # Use FFmpeg's minterpolate filter for optical flow-based frame blending
+    # Verify input files exist
+    if [[ ! -f "$prev_frame" ]] || [[ ! -f "$curr_frame" ]]; then
+      echo "Warning: Missing input files for frame $i, using original"
+      cp "$curr_frame" "$output_frame"
+      continue
+    fi
+    
+    # Use FFmpeg's blend filter with correct syntax for frame blending
     ffmpeg -i "$prev_frame" -i "$curr_frame" \
-      -filter_complex "[0:v][1:v]blend=all_expr='A*(1-${smoothing_strength})+B*${smoothing_strength}'" \
-      -y "$output_frame" 2>/dev/null || {
+      -filter_complex "[0:v][1:v]blend=all_mode=average:all_opacity=${smoothing_strength}" \
+      -frames:v 1 -update 1 -y "$output_frame" 2>/dev/null || {
         echo "Warning: Optical flow smoothing failed for frame $i, using original"
         cp "$curr_frame" "$output_frame"
       }
@@ -156,20 +163,35 @@ apply_temporal_filtering() {
     local next_frame="${images[$((i+1))]}"
     local output_frame="$temp_filter_dir/$(basename "$curr_frame")"
     
-    local weight_curr=$(echo "1.0 - $smoothing_strength" | bc -l)
-    local weight_neighbors=$(echo "$smoothing_strength / 2.0" | bc -l)
+    # Calculate weights (ensure they're valid floats)
+    local weight_curr=$(printf "%.3f" $(echo "1.0 - $smoothing_strength" | bc -l))
+    local weight_neighbors=$(printf "%.3f" $(echo "$smoothing_strength / 2.0" | bc -l))
     
-    # Use FFmpeg to blend three frames with temporal weights
-    ffmpeg -i "$prev_frame" -i "$curr_frame" -i "$next_frame" \
-      -filter_complex "[1:v]scale=512:512[curr];[0:v]scale=512:512[prev];[2:v]scale=512:512[next];[prev][curr][next]blend=all_expr='B*${weight_curr}+A*${weight_neighbors}+C*${weight_neighbors}'" \
-      -y "$output_frame" 2>/dev/null || {
+    # Verify all input files exist and are valid
+    if [[ ! -f "$prev_frame" ]] || [[ ! -f "$curr_frame" ]] || [[ ! -f "$next_frame" ]]; then
+      echo "Warning: Missing input files for frame $i, using original"
+      cp "$curr_frame" "$output_frame"
+      continue
+    fi
+    
+    # Use a simplified approach - blend current frame with average of neighbors
+    ffmpeg -i "$prev_frame" -i "$next_frame" \
+      -filter_complex "[0:v][1:v]blend=all_mode=average" \
+      -frames:v 1 -update 1 /tmp/neighbors_avg_$$.jpg 2>/dev/null && \
+    ffmpeg -i "$curr_frame" -i /tmp/neighbors_avg_$$.jpg \
+      -filter_complex "[0:v][1:v]blend=all_mode=average:all_opacity=${smoothing_strength}" \
+      -frames:v 1 -update 1 -y "$output_frame" 2>/dev/null || {
         echo "Warning: Temporal filtering failed for frame $i, using original"
         cp "$curr_frame" "$output_frame"
       }
+    
+    # Clean up temp file
+    rm -f /tmp/neighbors_avg_$$.jpg
   done
   
-  # Copy last frame as-is
-  cp "${images[-1]}" "$temp_filter_dir/$(basename "${images[-1]}")"
+  # Copy last frame as-is (use proper array indexing)
+  local last_index=$((${#images[@]} - 1))
+  cp "${images[$last_index]}" "$temp_filter_dir/$(basename "${images[$last_index]}")"
   
   # Replace original images with filtered versions
   cp "$temp_filter_dir"/*.jpeg "$output_dir/"
