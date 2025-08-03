@@ -334,7 +334,7 @@ if command -v nproc &> /dev/null; then
     if [[ $CPU_CORES -ge 16 ]] && [[ $TOTAL_RAM -ge 32 ]]; then
       MAX_CONCURRENT_REQUESTS=20
       BATCH_SIZE=40
-      DELAY=0.01
+      DELAY=0.005
       echo "High-end hardware detected: 20 concurrent requests, 40 batch size"
     elif [[ $CPU_CORES -ge 12 ]] && [[ $TOTAL_RAM -ge 16 ]]; then
       MAX_CONCURRENT_REQUESTS=16
