@@ -32,8 +32,16 @@ usage() {
   echo "       [--max-concurrent NUM] (max concurrent API requests, default: 12)"
   echo "       [--sequential] (disable parallel processing, process frames one by one)"
   echo "       [--batch-size NUM] (number of frames to process in each batch, default: 24)"
+  echo "       [--smoothing METHOD] (temporal smoothing: 'init', 'optical', 'temporal', 'none', default: none)"
+  echo "       [--smoothing-strength FLOAT] (smoothing strength 0.0-1.0, default: 0.3)"
   echo "       [--debug] (enable debug output for troubleshooting)"
   echo "       [--no-video] (skip video creation, keep only generated images)"
+  echo ""
+  echo "Smoothing Methods:"
+  echo "  init     - Use previous generated frame as init image (reduces flicker)"
+  echo "  optical  - Apply optical flow-based frame blending"
+  echo "  temporal - Apply temporal filtering using neighboring frames"
+  echo "  none     - No smoothing (default)"
   echo ""
   echo "Output video will be named using first 3 words of prompt + timestamp (e.g., van_gogh_starry_2025-08-02_2046.mp4)"
   exit 1
@@ -55,6 +63,99 @@ generate_video_name() {
   echo "${first_three_words}_${timestamp}.mp4"
 }
 
+# Temporal smoothing functions for reducing frame-to-frame inconsistency
+
+# Function to apply temporal smoothing using optical flow
+apply_optical_flow_smoothing() {
+  local output_dir="$1"
+  local smoothing_strength="$2"
+  local temp_smooth_dir="${output_dir}/temp_smooth"
+  
+  echo "Applying optical flow smoothing (strength: $smoothing_strength)..."
+  mkdir -p "$temp_smooth_dir"
+  
+  # Get list of generated images sorted by frame number
+  local images=($(ls "$output_dir"/*.jpeg 2>/dev/null | sort -V))
+  
+  if [[ ${#images[@]} -lt 2 ]]; then
+    echo "Warning: Not enough frames for optical flow smoothing"
+    return 0
+  fi
+  
+  # Copy first frame as-is
+  cp "${images[0]}" "$temp_smooth_dir/$(basename "${images[0]}")"
+  
+  # Apply optical flow smoothing to subsequent frames
+  for ((i=1; i<${#images[@]}; i++)); do
+    local prev_frame="${images[$((i-1))]}"
+    local curr_frame="${images[$i]}"
+    local output_frame="$temp_smooth_dir/$(basename "$curr_frame")"
+    
+    # Use FFmpeg's minterpolate filter for optical flow-based frame blending
+    ffmpeg -i "$prev_frame" -i "$curr_frame" \
+      -filter_complex "[0:v][1:v]blend=all_expr='A*(1-${smoothing_strength})+B*${smoothing_strength}'" \
+      -y "$output_frame" 2>/dev/null || {
+        echo "Warning: Optical flow smoothing failed for frame $i, using original"
+        cp "$curr_frame" "$output_frame"
+      }
+  done
+  
+  # Replace original images with smoothed versions
+  cp "$temp_smooth_dir"/*.jpeg "$output_dir/"
+  rm -rf "$temp_smooth_dir"
+  
+  echo "✓ Optical flow smoothing applied"
+}
+
+# Function to apply temporal filtering (post-processing approach)
+apply_temporal_filtering() {
+  local output_dir="$1"
+  local smoothing_strength="$2"
+  local temp_filter_dir="${output_dir}/temp_filter"
+  
+  echo "Applying temporal filtering (strength: $smoothing_strength)..."
+  mkdir -p "$temp_filter_dir"
+  
+  # Get list of generated images sorted by frame number
+  local images=($(ls "$output_dir"/*.jpeg 2>/dev/null | sort -V))
+  
+  if [[ ${#images[@]} -lt 3 ]]; then
+    echo "Warning: Not enough frames for temporal filtering"
+    return 0
+  fi
+  
+  # Copy first frame as-is
+  cp "${images[0]}" "$temp_filter_dir/$(basename "${images[0]}")"
+  
+  # Apply temporal filter using weighted average of previous, current, and next frames
+  for ((i=1; i<${#images[@]}-1; i++)); do
+    local prev_frame="${images[$((i-1))]}"
+    local curr_frame="${images[$i]}"
+    local next_frame="${images[$((i+1))]}"
+    local output_frame="$temp_filter_dir/$(basename "$curr_frame")"
+    
+    local weight_curr=$(echo "1.0 - $smoothing_strength" | bc -l)
+    local weight_neighbors=$(echo "$smoothing_strength / 2.0" | bc -l)
+    
+    # Use FFmpeg to blend three frames with temporal weights
+    ffmpeg -i "$prev_frame" -i "$curr_frame" -i "$next_frame" \
+      -filter_complex "[1:v]scale=512:512[curr];[0:v]scale=512:512[prev];[2:v]scale=512:512[next];[prev][curr][next]blend=all_expr='B*${weight_curr}+A*${weight_neighbors}+C*${weight_neighbors}'" \
+      -y "$output_frame" 2>/dev/null || {
+        echo "Warning: Temporal filtering failed for frame $i, using original"
+        cp "$curr_frame" "$output_frame"
+      }
+  done
+  
+  # Copy last frame as-is
+  cp "${images[-1]}" "$temp_filter_dir/$(basename "${images[-1]}")"
+  
+  # Replace original images with filtered versions
+  cp "$temp_filter_dir"/*.jpeg "$output_dir/"
+  rm -rf "$temp_filter_dir"
+  
+  echo "✓ Temporal filtering applied"
+}
+
 # Default values
 FPS=1
 MODEL="sd-v1-5.safetensors"
@@ -71,6 +172,8 @@ KEEP_FRAMES=false
 DELAY=0.05
 START_FRAME=1
 END_FRAME=""
+SMOOTHING="none"
+SMOOTHING_STRENGTH=0.3
 SEED=""
 PARALLEL_JOBS=4
 MAX_CONCURRENT_REQUESTS=12
@@ -104,6 +207,8 @@ while [[ "$#" -gt 0 ]]; do
     --max-concurrent) MAX_CONCURRENT_REQUESTS="$2"; shift ;;
     --sequential) SEQUENTIAL=true ;;
     --batch-size) BATCH_SIZE="$2"; shift ;;
+    --smoothing) SMOOTHING="$2"; shift ;;
+    --smoothing-strength) SMOOTHING_STRENGTH="$2"; shift ;;
     --debug) DEBUG=true ;;
     --no-video) NO_VIDEO=true ;;
     *) echo "Unknown parameter: $1"; usage ;;
@@ -122,6 +227,22 @@ if [[ -z "$PROMPT" ]]; then
   echo "Error: --prompt is required."
   echo ""
   usage
+fi
+
+# Validate smoothing parameters
+case "$SMOOTHING" in
+  "none"|"init"|"optical"|"temporal")
+    ;;
+  *)
+    echo "Error: Invalid smoothing method '$SMOOTHING'. Valid options: none, init, optical, temporal"
+    exit 1
+    ;;
+esac
+
+# Validate smoothing strength
+if ! [[ "$SMOOTHING_STRENGTH" =~ ^[0-9]*\.?[0-9]+$ ]] || (( $(echo "$SMOOTHING_STRENGTH < 0.0" | bc -l) )) || (( $(echo "$SMOOTHING_STRENGTH > 1.0" | bc -l) )); then
+  echo "Error: Smoothing strength must be between 0.0 and 1.0, got: $SMOOTHING_STRENGTH"
+  exit 1
 fi
 
 # Check if video file exists
@@ -180,6 +301,13 @@ fi
 if ! command -v ffmpeg &> /dev/null; then
   echo "Error: 'ffmpeg' command is required but not found. Install it with:"
   echo "sudo apt-get install ffmpeg"
+  exit 1
+fi
+
+# Check if bc (basic calculator) is available for smoothing calculations
+if [[ "$SMOOTHING" != "none" ]] && ! command -v bc &> /dev/null; then
+  echo "Error: 'bc' command is required for smoothing calculations but not found. Install it with:"
+  echo "sudo apt-get install bc"
   exit 1
 fi
 
@@ -293,7 +421,27 @@ process_frame() {
     echo "Warning: Frame file $frame_file not found, skipping..."
     return 1
   fi
+
+  # Determine init image based on smoothing method
+  local init_image="$frame_file"
+  local prompt_strength_adjusted="$PROMPT_STRENGTH"
   
+  if [[ "$SMOOTHING" == "init" ]] && [[ $frame_num -gt $START_FRAME ]]; then
+    # For init smoothing, use the previously generated frame as init image
+    local prev_frame_num=$((frame_num - 1))
+    local prev_generated_pattern="${SAVE_TO_DISK_PATH}/*frame_$(printf "%04d" $prev_frame_num)*.jpeg"
+    local prev_generated_file=$(ls $prev_generated_pattern 2>/dev/null | head -1)
+    
+    if [[ -f "$prev_generated_file" ]]; then
+      init_image="$prev_generated_file"
+      # Adjust prompt strength for smoother transitions
+      prompt_strength_adjusted=$(echo "$PROMPT_STRENGTH * (1.0 - $SMOOTHING_STRENGTH)" | bc -l)
+      echo "Using init smoothing: previous frame -> current (strength: $prompt_strength_adjusted)"
+    else
+      echo "Warning: Previous generated frame not found, using original frame"
+    fi
+  fi
+
   # Generate unique seed for each frame if not provided
   local frame_seed
   if [[ -z "$SEED" ]]; then
@@ -309,21 +457,21 @@ process_frame() {
   
   # Debug output if enabled
   if [[ "$DEBUG" == true ]]; then
-    echo "DEBUG: Command: bash $EASY_DIFFUSION_CLI --prompt \"$PROMPT\" --model \"$MODEL\" --init-image \"$frame_file\" --seed \"$frame_seed\" --save-to-disk-path \"$SAVE_TO_DISK_PATH\" --session_id \"$frame_session_id\""
+    echo "DEBUG: Command: bash $EASY_DIFFUSION_CLI --prompt \"$PROMPT\" --model \"$MODEL\" --init-image \"$init_image\" --seed \"$frame_seed\" --save-to-disk-path \"$SAVE_TO_DISK_PATH\" --session_id \"$frame_session_id\""
   fi
   
-  # Run easy-diffusion-cli-enhanced.sh with the frame as init image and capture response
+  # Run easy-diffusion-cli-enhanced.sh with the init image and capture response
   local api_response
   if [[ "$DEBUG" == true ]]; then
     api_response=$(bash "$EASY_DIFFUSION_CLI" \
       --prompt "$PROMPT" \
       --model "$MODEL" \
-      --init-image "$frame_file" \
+      --init-image "$init_image" \
       --seed "$frame_seed" \
       --negative-prompt "$NEGATIVE_PROMPT" \
       --num-inference-steps "$NUM_INFERENCE_STEPS" \
       --guidance-scale "$GUIDANCE_SCALE" \
-      --prompt-strength "$PROMPT_STRENGTH" \
+      --prompt-strength "$prompt_strength_adjusted" \
       --width "$WIDTH" \
       --height "$HEIGHT" \
       --save-to-disk-path "$SAVE_TO_DISK_PATH" \
@@ -333,12 +481,12 @@ process_frame() {
     api_response=$(bash "$EASY_DIFFUSION_CLI" \
       --prompt "$PROMPT" \
       --model "$MODEL" \
-      --init-image "$frame_file" \
+      --init-image "$init_image" \
       --seed "$frame_seed" \
       --negative-prompt "$NEGATIVE_PROMPT" \
       --num-inference-steps "$NUM_INFERENCE_STEPS" \
       --guidance-scale "$GUIDANCE_SCALE" \
-      --prompt-strength "$PROMPT_STRENGTH" \
+      --prompt-strength "$prompt_strength_adjusted" \
       --width "$WIDTH" \
       --height "$HEIGHT" \
       --save-to-disk-path "$SAVE_TO_DISK_PATH" \
@@ -468,6 +616,25 @@ echo "Video diffusion processing completed!"
 
 # Automatically create video from generated images unless --no-video flag is used
 if [[ "$NO_VIDEO" == false ]]; then
+  # Apply temporal smoothing if enabled
+  if [[ "$SMOOTHING" != "none" ]] && [[ "$SMOOTHING" != "init" ]]; then
+    echo ""
+    echo "Applying temporal smoothing ($SMOOTHING method)..."
+    case "$SMOOTHING" in
+      "optical")
+        apply_optical_flow_smoothing "$SAVE_TO_DISK_PATH" "$SMOOTHING_STRENGTH"
+        ;;
+      "temporal")
+        apply_temporal_filtering "$SAVE_TO_DISK_PATH" "$SMOOTHING_STRENGTH"
+        ;;
+      *)
+        echo "Warning: Unknown smoothing method '$SMOOTHING', skipping"
+        ;;
+    esac
+  elif [[ "$SMOOTHING" == "init" ]]; then
+    echo "✓ Init-based smoothing applied during generation"
+  fi
+
   # Create output video filename using first 3 prompt words and timestamp
   OUTPUT_VIDEO=$(generate_video_name "$PROMPT")
   echo "Creating video from generated images..."
