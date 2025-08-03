@@ -192,7 +192,7 @@ check_server() {
   fi
 }
 
-# Function to get server load (basic implementation)
+# Function to get server load (enhanced implementation)
 get_server_load() {
   local port="$1"
   
@@ -209,44 +209,196 @@ get_server_load() {
   fi
 }
 
-# Function to select best available server
+# Enhanced server tracking with file-based synchronization for parallel processing
+SERVER_TRACKING_DIR="/tmp/video_diffusion_servers_$$"
+
+# Function to initialize server tracking
+init_server_tracking() {
+  local gpu_ports_array=(${GPU_PORTS//,/ })
+  local cpu_ports_array=(${CPU_PORTS//,/ })
+  
+  # Create tracking directory
+  mkdir -p "$SERVER_TRACKING_DIR"
+  
+  # Initialize GPU servers
+  for port in "${gpu_ports_array[@]}"; do
+    echo "0" > "$SERVER_TRACKING_DIR/${port}_GPU_queue"
+    echo "0" > "$SERVER_TRACKING_DIR/${port}_GPU_lastused"
+  done
+  
+  # Initialize CPU servers if hybrid processing enabled
+  if [[ "$HYBRID_PROCESSING" == true ]] || [[ "$CPU_FALLBACK" == true ]]; then
+    for port in "${cpu_ports_array[@]}"; do
+      echo "0" > "$SERVER_TRACKING_DIR/${port}_CPU_queue"
+      echo "0" > "$SERVER_TRACKING_DIR/${port}_CPU_lastused"
+    done
+  fi
+}
+
+# Function to get server queue count
+get_server_queue() {
+  local port="$1"
+  local server_type="$2"
+  local queue_file="$SERVER_TRACKING_DIR/${port}_${server_type}_queue"
+  
+  if [[ -f "$queue_file" ]]; then
+    cat "$queue_file"
+  else
+    echo "0"
+  fi
+}
+
+# Function to get server last used time
+get_server_last_used() {
+  local port="$1"
+  local server_type="$2"
+  local lastused_file="$SERVER_TRACKING_DIR/${port}_${server_type}_lastused"
+  
+  if [[ -f "$lastused_file" ]]; then
+    cat "$lastused_file"
+  else
+    echo "0"
+  fi
+}
+
+# Function to increment server queue
+increment_server_queue() {
+  local port="$1"
+  local server_type="$2"
+  local queue_file="$SERVER_TRACKING_DIR/${port}_${server_type}_queue"
+  local lastused_file="$SERVER_TRACKING_DIR/${port}_${server_type}_lastused"
+  
+  # Use flock for atomic operations
+  (
+    flock -x 200
+    local current_queue=$(cat "$queue_file" 2>/dev/null || echo "0")
+    echo $((current_queue + 1)) > "$queue_file"
+    date +%s > "$lastused_file"
+  ) 200>"$queue_file.lock"
+}
+
+# Function to decrement server queue
+decrement_server_queue() {
+  local port="$1"
+  local server_type="$2"
+  local queue_file="$SERVER_TRACKING_DIR/${port}_${server_type}_queue"
+  
+  # Use flock for atomic operations
+  (
+    flock -x 200
+    local current_queue=$(cat "$queue_file" 2>/dev/null || echo "0")
+    if [[ $current_queue -gt 0 ]]; then
+      echo $((current_queue - 1)) > "$queue_file"
+    fi
+  ) 200>"$queue_file.lock"
+}
+
+# Function to select best available server with proper queue management
 select_best_server() {
   local gpu_ports_array=(${GPU_PORTS//,/ })
   local cpu_ports_array=(${CPU_PORTS//,/ })
-  local best_port=""
-  local best_load=999
-  local best_type=""
+  local best_server=""
+  local min_queue=999
+  local current_time=$(date +%s)
   
-  # Check GPU servers first (preferred)
+  # Function to check if server is truly available
+  server_is_available() {
+    local port="$1"
+    local server_type="$2"
+    
+    # Check basic connectivity
+    if ! check_server "$port" 1; then
+      return 1
+    fi
+    
+    # Check queue count and recent usage
+    local queue_count=$(get_server_queue "$port" "$server_type")
+    local last_used=$(get_server_last_used "$port" "$server_type")
+    local time_since_last=$((current_time - last_used))
+    
+    # Server is available if:
+    # 1. Queue count is reasonable (< 15 for conservative approach)
+    # 2. Enough time has passed since last use (for CPU servers)
+    local max_queue=15  # Conservative limit per server
+    if [[ "$server_type" == "CPU" ]] && [[ $time_since_last -lt 20 ]]; then
+      # CPU servers need some breathing room
+      if [[ $queue_count -gt 5 ]]; then
+        return 1
+      fi
+    fi
+    
+    if [[ $queue_count -lt $max_queue ]]; then
+      return 0
+    else
+      return 1
+    fi
+  }
+  
+  # Check GPU servers first (preferred for speed)
   for port in "${gpu_ports_array[@]}"; do
-    if check_server "$port" 2; then
-      local load=$(get_server_load "$port")
-      if [[ "$load" -lt "$best_load" ]]; then
-        best_port="$port"
-        best_load="$load"
-        best_type="GPU"
+    if server_is_available "$port" "GPU"; then
+      local queue_count=$(get_server_queue "$port" "GPU")
+      if [[ $queue_count -lt $min_queue ]]; then
+        min_queue=$queue_count
+        best_server="$port:GPU"
       fi
     fi
   done
   
-  # If hybrid processing enabled or CPU fallback needed, check CPU servers
-  if [[ "$HYBRID_PROCESSING" == true ]] || [[ "$CPU_FALLBACK" == true && "$best_load" -gt 2 ]]; then
+  # If hybrid processing enabled, also check CPU servers
+  if [[ "$HYBRID_PROCESSING" == true ]] && [[ -z "$best_server" || $min_queue -gt 8 ]]; then
     for port in "${cpu_ports_array[@]}"; do
-      if check_server "$port" 2; then
-        local load=$(get_server_load "$port")
-        if [[ "$load" -lt "$best_load" ]] || [[ "$HYBRID_PROCESSING" == true && "$load" -le 2 ]]; then
-          best_port="$port"
-          best_load="$load"
-          best_type="CPU"
+      if server_is_available "$port" "CPU"; then
+        local queue_count=$(get_server_queue "$port" "CPU")
+        # Prefer CPU if GPU is heavily loaded or for load balancing
+        if [[ $queue_count -lt $min_queue ]] || [[ "$HYBRID_PROCESSING" == true && $queue_count -le 5 ]]; then
+          min_queue=$queue_count
+          best_server="$port:CPU"
         fi
       fi
     done
   fi
   
-  if [[ -n "$best_port" ]]; then
-    echo "$best_port:$best_type"
+  # CPU fallback logic
+  if [[ "$CPU_FALLBACK" == true ]] && [[ -z "$best_server" || $min_queue -gt 12 ]]; then
+    for port in "${cpu_ports_array[@]}"; do
+      if server_is_available "$port" "CPU"; then
+        local queue_count=$(get_server_queue "$port" "CPU")
+        if [[ $queue_count -lt $min_queue ]]; then
+          min_queue=$queue_count
+          best_server="$port:CPU"
+        fi
+      fi
+    done
+  fi
+  
+  # If we found a server, update tracking
+  if [[ -n "$best_server" ]]; then
+    local selected_port="${best_server%%:*}"
+    local server_type="${best_server##*:}"
+    increment_server_queue "$selected_port" "$server_type"
+    echo "$best_server"
   else
-    echo "9000:GPU"  # Fallback to default
+    # Fallback to default GPU
+    increment_server_queue "9000" "GPU"
+    echo "9000:GPU"
+  fi
+}
+
+# Function to release server when job completes
+release_server() {
+  local server="$1"
+  if [[ -n "$server" ]]; then
+    local port="${server%%:*}"
+    local server_type="${server##*:}"
+    decrement_server_queue "$port" "$server_type"
+  fi
+}
+
+# Cleanup function for server tracking
+cleanup_server_tracking() {
+  if [[ -d "$SERVER_TRACKING_DIR" ]]; then
+    rm -rf "$SERVER_TRACKING_DIR"
   fi
 }
 
@@ -611,10 +763,14 @@ process_frame() {
     server_info=$(select_best_server)
     local selected_port="${server_info%%:*}"
     local server_type="${server_info##*:}"
-    echo "Using $server_type server on port $selected_port for frame $frame_num"
+    local current_queue=$(get_server_queue "$selected_port" "$server_type")
+    echo "Using $server_type server on port $selected_port for frame $frame_num (queue: $current_queue)"
   else
     selected_port="9000"
     server_type="GPU"
+    server_info="9000:GPU"
+    increment_server_queue "9000" "GPU"
+  fi
   fi
   
   # Debug output if enabled
@@ -658,6 +814,10 @@ process_frame() {
   fi
   
   local exit_code=$?
+  
+  # Release server from queue tracking
+  release_server "$server_info"
+  
   if [[ $exit_code -eq 0 ]]; then
     # Check if output files were actually created
     if [[ "$DEBUG" == true ]]; then
@@ -673,11 +833,24 @@ process_frame() {
 }
 
 # Export function and variables for parallel processing
-export -f process_frame select_best_server check_server get_server_load
+export -f process_frame select_best_server check_server get_server_load release_server
+export -f get_server_queue get_server_last_used increment_server_queue decrement_server_queue
 export TEMP_DIR PROMPT MODEL SEED NEGATIVE_PROMPT NUM_INFERENCE_STEPS 
 export GUIDANCE_SCALE PROMPT_STRENGTH WIDTH HEIGHT SAVE_TO_DISK_PATH 
 export SESSION_ID EASY_DIFFUSION_CLI END_FRAME SMOOTHING SMOOTHING_STRENGTH
-export HYBRID_PROCESSING CPU_FALLBACK GPU_PORTS CPU_PORTS DEBUG
+export HYBRID_PROCESSING CPU_FALLBACK GPU_PORTS CPU_PORTS DEBUG SERVER_TRACKING_DIR
+
+# Initialize server tracking before processing starts
+echo "Initializing server queue management..."
+init_server_tracking
+
+if [[ "$DEBUG" == true ]]; then
+  echo "DEBUG: Server tracking initialized in $SERVER_TRACKING_DIR"
+  ls -la "$SERVER_TRACKING_DIR/"
+fi
+
+# Ensure cleanup on exit
+trap cleanup_server_tracking EXIT
 
 # Process frames in parallel or sequential mode
 if [[ "$SEQUENTIAL" == true ]]; then
