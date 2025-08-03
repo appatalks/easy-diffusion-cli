@@ -320,8 +320,8 @@ select_best_server() {
     if [[ "$server_type" == "CPU" ]]; then
       # CPU servers are much more restrictive
       local max_cpu_queue=1  # Only 1 frame at a time for CPU
-      if [[ $time_since_last -lt 30 ]]; then
-        # CPU servers need more breathing room (30 seconds)
+      if [[ $time_since_last -lt 60 ]]; then
+        # CPU servers need more breathing room (60 seconds to match processing delay)
         return 1
       fi
       if [[ $queue_count -gt $max_cpu_queue ]]; then
@@ -356,7 +356,7 @@ select_best_server() {
   done
   
   # If hybrid processing enabled, also check CPU servers
-  if [[ "$HYBRID_PROCESSING" == true ]] && [[ -z "$best_server" || $min_queue -gt 8 ]]; then
+  if [[ "$HYBRID_PROCESSING" == true ]] && [[ -z "$best_server" || $min_queue -gt 2 ]]; then
     for port in "${cpu_ports_array[@]}"; do
       if server_is_available "$port" "CPU"; then
         local queue_count=$(get_server_queue "$port" "CPU")
@@ -782,9 +782,18 @@ process_frame() {
     increment_server_queue "9000" "GPU"
   fi
   
+  # Set timeout based on server type - CPU needs much longer
+  local timeout_value
+  if [[ "$server_type" == "CPU" ]]; then
+    timeout_value=600  # 10 minutes for CPU processing
+    echo "Using extended timeout for CPU processing: ${timeout_value}s"
+  else
+    timeout_value=120  # 2 minutes for GPU processing
+  fi
+  
   # Debug output if enabled
   if [[ "$DEBUG" == true ]]; then
-    echo "DEBUG: Command: bash $EASY_DIFFUSION_CLI --prompt \"$PROMPT\" --model \"$MODEL\" --init-image \"$init_image\" --seed \"$frame_seed\" --port \"$selected_port\" --save-to-disk-path \"$SAVE_TO_DISK_PATH\" --session_id \"$frame_session_id\""
+    echo "DEBUG: Command: bash $EASY_DIFFUSION_CLI --prompt \"$PROMPT\" --model \"$MODEL\" --init-image \"$init_image\" --seed \"$frame_seed\" --port \"$selected_port\" --timeout \"$timeout_value\" --save-to-disk-path \"$SAVE_TO_DISK_PATH\" --session_id \"$frame_session_id\""
   fi
   
   # Run easy-diffusion-cli-enhanced.sh with the init image and capture response
@@ -802,6 +811,7 @@ process_frame() {
       --width "$WIDTH" \
       --height "$HEIGHT" \
       --port "$selected_port" \
+      --timeout "$timeout_value" \
       --save-to-disk-path "$SAVE_TO_DISK_PATH" \
       --session_id "$frame_session_id")
     echo "DEBUG: API Response: $api_response"
@@ -818,6 +828,7 @@ process_frame() {
       --width "$WIDTH" \
       --height "$HEIGHT" \
       --port "$selected_port" \
+      --timeout "$timeout_value" \
       --save-to-disk-path "$SAVE_TO_DISK_PATH" \
       --session_id "$frame_session_id" 2>/dev/null)
   fi
@@ -863,12 +874,16 @@ process_frame() {
           echo "DEBUG: Output verified: $largest_file ($largest_size bytes)"
         fi
         echo "✓ Frame $frame_num processed successfully ($server_type server)"
+        # Write success to results file for batch tracking
+        echo "PROCESSED:$frame_num:$server_type" >> "/tmp/video_diffusion_results_$$"
         return 0
       else
         echo "✗ Frame $frame_num: Output file too small ($largest_size bytes) - likely corrupted"
         if [[ "$DEBUG" == true ]]; then
           echo "DEBUG: Files found but all too small: ${output_files[*]}"
         fi
+        # Write failure to failures file for batch tracking
+        echo "FAILED:$frame_num:$server_type" >> "/tmp/video_diffusion_failures_$$"
         return 1
       fi
     else
@@ -880,6 +895,8 @@ process_frame() {
         echo "DEBUG: Session ID: $frame_session_id"
         echo "DEBUG: Save path: $SAVE_TO_DISK_PATH"
       fi
+      # Write failure to failures file for batch tracking
+      echo "FAILED:$frame_num:$server_type" >> "/tmp/video_diffusion_failures_$$"
       return 1
     fi
   else
@@ -887,6 +904,8 @@ process_frame() {
     if [[ "$DEBUG" == true ]]; then
       echo "DEBUG: API call failed for frame $frame_num on $server_type server port $selected_port"
     fi
+    # Write failure to failures file for batch tracking
+    echo "FAILED:$frame_num:$server_type" >> "/tmp/video_diffusion_failures_$$"
     return 1
   fi
 }
@@ -973,50 +992,19 @@ else
       for frame_num in "${frames_list[@]}"; do
         echo "Processing CPU batch: frame $frame_num"
         
-        # Create semaphore for CPU processing (limit to 1-2 concurrent)
-        local cpu_semaphore="/tmp/video_diffusion_cpu_sem_$$"
-        mkfifo "$cpu_semaphore"
-        exec 4<>"$cpu_semaphore"
-        rm "$cpu_semaphore"
-        
-        # Initialize semaphore with fewer tokens for CPU
-        local cpu_concurrent=1
-        if [[ "$HYBRID_PROCESSING" == true ]]; then
-          cpu_concurrent=2  # Allow 2 CPU frames in parallel for hybrid mode
+        # Process single frame with extended timeout for CPU - NO PARALLEL PROCESSING
+        local start_time=$(date +%s)
+        if process_frame "$frame_num"; then
+          local end_time=$(date +%s)
+          local duration=$((end_time - start_time))
+          echo "✓ CPU frame $frame_num completed in ${duration}s"
+        else
+          echo "✗ CPU frame $frame_num failed - will retry"
         fi
         
-        for ((i=0; i<cpu_concurrent; i++)); do
-          echo >&4
-        done
-        
-        # Wait for semaphore token
-        read <&4
-        
-        # Process single frame with extended timeout for CPU
-        {
-          local start_time=$(date +%s)
-          if timeout 300 process_frame "$frame_num"; then  # 5 minute timeout for CPU
-            echo "PROCESSED:$frame_num" >> "/tmp/video_diffusion_results_$$"
-            local end_time=$(date +%s)
-            local duration=$((end_time - start_time))
-            echo "✓ CPU frame $frame_num completed in ${duration}s"
-          else
-            echo "FAILED:$frame_num" >> "/tmp/video_diffusion_failures_$$"
-            echo "✗ CPU frame $frame_num failed or timed out"
-          fi
-          
-          # Release semaphore token
-          echo >&4
-        } &
-        
-        # Wait for this frame to complete before starting next
-        wait
-        
-        # Clean up semaphore
-        exec 4>&-
-        
         # Add delay between CPU frames to prevent overload
-        sleep 2
+        echo "CPU processing delay (60 seconds)..."
+        sleep 60
       done
     else
       # GPU-optimized processing: standard batching
@@ -1040,10 +1028,13 @@ else
         
         # Process frame in background
         {
-          if timeout 120 process_frame "$frame_num"; then  # 2 minute timeout for GPU
-            echo "PROCESSED:$frame_num" >> "/tmp/video_diffusion_results_$$"
+          local start_time=$(date +%s)
+          if process_frame "$frame_num"; then
+            local end_time=$(date +%s)
+            local duration=$((end_time - start_time))
+            echo "✓ GPU frame $frame_num completed in ${duration}s"
           else
-            echo "FAILED:$frame_num" >> "/tmp/video_diffusion_failures_$$"
+            echo "✗ GPU frame $frame_num failed - will retry"
           fi
           
           # Add small delay to prevent overwhelming the server
@@ -1091,10 +1082,12 @@ else
       # Extract failed frame numbers for retry
       FAILED_FRAMES=()
       while read -r line; do
-        if [[ "$line" =~ FAILED:([0-9]+) ]]; then
+        if [[ "$line" =~ FAILED:([0-9]+):(CPU|GPU) ]]; then
           failed_frame="${BASH_REMATCH[1]}"
+          server_type="${BASH_REMATCH[2]}"
           FAILED_FRAMES+=("$failed_frame")
-          echo "$failed_frame:$((retry_count + 1))" >> "$RETRY_ATTEMPTS"
+          echo "$failed_frame:$((retry_count + 1)):$server_type" >> "$RETRY_ATTEMPTS"
+          echo "  → Frame $failed_frame failed on $server_type server, queued for retry"
         fi
       done < "/tmp/video_diffusion_failures_$$"
     fi
@@ -1104,12 +1097,37 @@ else
     # Prepare for next retry if needed
     if [[ ${#FAILED_FRAMES[@]} -gt 0 ]] && [[ $retry_count -lt $((max_retries - 1)) ]]; then
       echo "Requeuing ${#FAILED_FRAMES[@]} failed frames for retry..."
+      
+      # Check what types of servers failed to adjust retry strategy
+      local cpu_failures=0
+      local gpu_failures=0
+      while read -r line; do
+        if [[ "$line" =~ FAILED:([0-9]+):CPU ]]; then
+          ((cpu_failures++))
+        elif [[ "$line" =~ FAILED:([0-9]+):GPU ]]; then
+          ((gpu_failures++))
+        fi
+      done < "/tmp/video_diffusion_failures_$$"
+      
+      if [[ $cpu_failures -gt 0 ]]; then
+        echo "  → $cpu_failures CPU failures detected - increasing retry delay"
+      fi
+      if [[ $gpu_failures -gt 0 ]]; then
+        echo "  → $gpu_failures GPU failures detected"
+      fi
+      
       FRAMES_TO_PROCESS=("${FAILED_FRAMES[@]}")
       ((retry_count++))
       
-      # Add delay before retry to let servers recover
-      echo "Waiting 10 seconds before retry..."
-      sleep 10
+      # Add longer delay for CPU failures, shorter for GPU
+      local retry_delay=10
+      if [[ $cpu_failures -gt 0 ]]; then
+        retry_delay=120  # CPU servers need much more recovery time
+        echo "Waiting $retry_delay seconds before retry (CPU failures detected)..."
+      else
+        echo "Waiting $retry_delay seconds before retry..."
+      fi
+      sleep $retry_delay
     else
       break
     fi
