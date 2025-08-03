@@ -316,22 +316,32 @@ select_best_server() {
     local last_used=$(get_server_last_used "$port" "$server_type")
     local time_since_last=$((current_time - last_used))
     
-    # Server is available if:
-    # 1. Queue count is reasonable (< 15 for conservative approach)
-    # 2. Enough time has passed since last use (for CPU servers)
-    local max_queue=15  # Conservative limit per server
-    if [[ "$server_type" == "CPU" ]] && [[ $time_since_last -lt 20 ]]; then
-      # CPU servers need some breathing room
-      if [[ $queue_count -gt 5 ]]; then
+    # Server-specific availability logic
+    if [[ "$server_type" == "CPU" ]]; then
+      # CPU servers are much more restrictive
+      local max_cpu_queue=1  # Only 1 frame at a time for CPU
+      if [[ $time_since_last -lt 30 ]]; then
+        # CPU servers need more breathing room (30 seconds)
+        return 1
+      fi
+      if [[ $queue_count -gt $max_cpu_queue ]]; then
+        return 1
+      fi
+    else
+      # GPU servers can handle more load
+      local max_gpu_queue=15
+      if [[ $time_since_last -lt 5 ]]; then
+        # GPU servers need less breathing room (5 seconds)
+        if [[ $queue_count -gt 8 ]]; then
+          return 1
+        fi
+      fi
+      if [[ $queue_count -gt $max_gpu_queue ]]; then
         return 1
       fi
     fi
     
-    if [[ $queue_count -lt $max_queue ]]; then
-      return 0
-    else
-      return 1
-    fi
+    return 0
   }
   
   # Check GPU servers first (preferred for speed)
@@ -771,7 +781,6 @@ process_frame() {
     server_info="9000:GPU"
     increment_server_queue "9000" "GPU"
   fi
-  fi
   
   # Debug output if enabled
   if [[ "$DEBUG" == true ]]; then
@@ -819,15 +828,65 @@ process_frame() {
   release_server "$server_info"
   
   if [[ $exit_code -eq 0 ]]; then
-    # Check if output files were actually created
+    # Verify that output files were actually created
+    local output_files=()
+    
+    # Check for files with different extensions separately to avoid bash expansion issues
+    for ext in jpeg jpg png; do
+      while IFS= read -r -d '' file; do
+        output_files+=("$file")
+      done < <(find "$SAVE_TO_DISK_PATH" -name "*${frame_session_id}*.${ext}" -print0 2>/dev/null)
+    done
+    
     if [[ "$DEBUG" == true ]]; then
-      echo "DEBUG: Checking for output files in $SAVE_TO_DISK_PATH with session $frame_session_id"
-      ls -la "$SAVE_TO_DISK_PATH"*"$frame_session_id"* 2>/dev/null || echo "DEBUG: No files found for session $frame_session_id"
+      echo "DEBUG: Searching for files matching: $SAVE_TO_DISK_PATH*$frame_session_id*.{jpeg,jpg,png}"
+      echo "DEBUG: Found ${#output_files[@]} files: ${output_files[*]}"
     fi
-    echo "✓ Frame $frame_num processed successfully"
-    return 0
+    
+    if [[ ${#output_files[@]} -gt 0 ]]; then
+      # Additional verification: check file size
+      local largest_file=""
+      local largest_size=0
+      for file in "${output_files[@]}"; do
+        if [[ -f "$file" ]]; then
+          # Use stat command that works on Linux
+          local file_size=$(stat -c%s "$file" 2>/dev/null || wc -c < "$file" 2>/dev/null || echo 0)
+          if [[ $file_size -gt $largest_size ]]; then
+            largest_size=$file_size
+            largest_file="$file"
+          fi
+        fi
+      done
+      
+      if [[ $largest_size -gt 1000 ]]; then  # File should be at least 1KB
+        if [[ "$DEBUG" == true ]]; then
+          echo "DEBUG: Output verified: $largest_file ($largest_size bytes)"
+        fi
+        echo "✓ Frame $frame_num processed successfully ($server_type server)"
+        return 0
+      else
+        echo "✗ Frame $frame_num: Output file too small ($largest_size bytes) - likely corrupted"
+        if [[ "$DEBUG" == true ]]; then
+          echo "DEBUG: Files found but all too small: ${output_files[*]}"
+        fi
+        return 1
+      fi
+    else
+      echo "✗ Frame $frame_num: No output files created (API success but no files)"
+      if [[ "$DEBUG" == true ]]; then
+        echo "DEBUG: Expected pattern: $SAVE_TO_DISK_PATH*$frame_session_id*.{jpeg,jpg,png}"
+        echo "DEBUG: Files in output directory:"
+        ls -la "$SAVE_TO_DISK_PATH" | head -10
+        echo "DEBUG: Session ID: $frame_session_id"
+        echo "DEBUG: Save path: $SAVE_TO_DISK_PATH"
+      fi
+      return 1
+    fi
   else
-    echo "✗ Failed to process frame $frame_num (exit code: $exit_code)"
+    echo "✗ Failed to process frame $frame_num (exit code: $exit_code, $server_type server)"
+    if [[ "$DEBUG" == true ]]; then
+      echo "DEBUG: API call failed for frame $frame_num on $server_type server port $selected_port"
+    fi
     return 1
   fi
 }
@@ -867,7 +926,7 @@ if [[ "$SEQUENTIAL" == true ]]; then
     fi
   done
 else
-  # Parallel processing with batching and concurrency control
+  # Enhanced parallel processing with CPU-specific batching and frame requeuing
   PROCESSED_COUNT=0
   TOTAL_TO_PROCESS=$((END_FRAME - START_FRAME + 1))
   
@@ -877,69 +936,201 @@ else
     FRAMES_TO_PROCESS+=($i)
   done
   
-  # Process frames in batches
-  for ((batch_start=0; batch_start<${#FRAMES_TO_PROCESS[@]}; batch_start+=BATCH_SIZE)); do
-    batch_end=$((batch_start + BATCH_SIZE - 1))
-    if [[ $batch_end -ge ${#FRAMES_TO_PROCESS[@]} ]]; then
-      batch_end=$((${#FRAMES_TO_PROCESS[@]} - 1))
+  # Track failed frames for requeuing
+  FAILED_FRAMES=()
+  RETRY_ATTEMPTS="/tmp/video_diffusion_retries_$$"
+  > "$RETRY_ATTEMPTS"  # Initialize retry tracking file
+  
+  # Function to process frames with CPU-aware batching
+  process_frames_batch() {
+    local frames_list=("$@")
+    local batch_results=()
+    
+    # Determine if this batch should use CPU-specific handling
+    local use_cpu_batching=false
+    if [[ "$HYBRID_PROCESSING" == true ]] || [[ "$CPU_FALLBACK" == true ]]; then
+      # Check if we're likely to use CPU servers (GPU overloaded)
+      local gpu_load=0
+      local gpu_ports_array=(${GPU_PORTS//,/ })
+      for port in "${gpu_ports_array[@]}"; do
+        if check_server "$port" 1; then
+          local gpu_queue=$(get_server_queue "$port" "GPU")
+          gpu_load=$((gpu_load + gpu_queue))
+        fi
+      done
+      
+      # If GPU servers are heavily loaded, use CPU-specific batching
+      if [[ $gpu_load -gt 10 ]]; then
+        use_cpu_batching=true
+        echo "GPU servers heavily loaded (queue: $gpu_load), using CPU-optimized batching"
+      fi
     fi
     
-    echo "Processing batch: frames ${FRAMES_TO_PROCESS[$batch_start]} to ${FRAMES_TO_PROCESS[$batch_end]}"
-    
-    # Create semaphore for concurrency control
-    SEMAPHORE="/tmp/video_diffusion_sem_$$"
-    mkfifo "$SEMAPHORE"
-    exec 3<>"$SEMAPHORE"
-    rm "$SEMAPHORE"
-    
-    # Initialize semaphore with tokens
-    for ((i=0; i<MAX_CONCURRENT_REQUESTS; i++)); do
-      echo >&3
-    done
-    
-    # Process frames in current batch
-    for ((i=batch_start; i<=batch_end; i++)); do
-      frame_num=${FRAMES_TO_PROCESS[$i]}
+    if [[ "$use_cpu_batching" == true ]]; then
+      # CPU-optimized processing: one frame at a time with higher timeout
+      echo "Processing ${#frames_list[@]} frames with CPU-optimized batching (1 frame at a time)"
       
-      # Wait for semaphore token
-      read <&3
-      
-      # Process frame in background
-      {
-        if process_frame $frame_num; then
-          echo "PROCESSED:$frame_num" >> "/tmp/video_diffusion_results_$$"
+      for frame_num in "${frames_list[@]}"; do
+        echo "Processing CPU batch: frame $frame_num"
+        
+        # Create semaphore for CPU processing (limit to 1-2 concurrent)
+        local cpu_semaphore="/tmp/video_diffusion_cpu_sem_$$"
+        mkfifo "$cpu_semaphore"
+        exec 4<>"$cpu_semaphore"
+        rm "$cpu_semaphore"
+        
+        # Initialize semaphore with fewer tokens for CPU
+        local cpu_concurrent=1
+        if [[ "$HYBRID_PROCESSING" == true ]]; then
+          cpu_concurrent=2  # Allow 2 CPU frames in parallel for hybrid mode
         fi
         
-        # Add small delay to prevent overwhelming the server
-        sleep $DELAY
+        for ((i=0; i<cpu_concurrent; i++)); do
+          echo >&4
+        done
         
-        # Release semaphore token
+        # Wait for semaphore token
+        read <&4
+        
+        # Process single frame with extended timeout for CPU
+        {
+          local start_time=$(date +%s)
+          if timeout 300 process_frame "$frame_num"; then  # 5 minute timeout for CPU
+            echo "PROCESSED:$frame_num" >> "/tmp/video_diffusion_results_$$"
+            local end_time=$(date +%s)
+            local duration=$((end_time - start_time))
+            echo "✓ CPU frame $frame_num completed in ${duration}s"
+          else
+            echo "FAILED:$frame_num" >> "/tmp/video_diffusion_failures_$$"
+            echo "✗ CPU frame $frame_num failed or timed out"
+          fi
+          
+          # Release semaphore token
+          echo >&4
+        } &
+        
+        # Wait for this frame to complete before starting next
+        wait
+        
+        # Clean up semaphore
+        exec 4>&-
+        
+        # Add delay between CPU frames to prevent overload
+        sleep 2
+      done
+    else
+      # GPU-optimized processing: standard batching
+      echo "Processing ${#frames_list[@]} frames with GPU-optimized batching"
+      
+      # Create semaphore for concurrency control
+      local gpu_semaphore="/tmp/video_diffusion_gpu_sem_$$"
+      mkfifo "$gpu_semaphore"
+      exec 3<>"$gpu_semaphore"
+      rm "$gpu_semaphore"
+      
+      # Initialize semaphore with tokens
+      for ((i=0; i<MAX_CONCURRENT_REQUESTS; i++)); do
         echo >&3
-      } &
-    done
+      done
+      
+      # Process frames in parallel
+      for frame_num in "${frames_list[@]}"; do
+        # Wait for semaphore token
+        read <&3
+        
+        # Process frame in background
+        {
+          if timeout 120 process_frame "$frame_num"; then  # 2 minute timeout for GPU
+            echo "PROCESSED:$frame_num" >> "/tmp/video_diffusion_results_$$"
+          else
+            echo "FAILED:$frame_num" >> "/tmp/video_diffusion_failures_$$"
+          fi
+          
+          # Add small delay to prevent overwhelming the server
+          sleep $DELAY
+          
+          # Release semaphore token
+          echo >&3
+        } &
+      done
+      
+      # Wait for all background jobs to complete
+      wait
+      
+      # Clean up semaphore
+      exec 3>&-
+    fi
+  }
+  
+  # Main processing loop with retry logic
+  retry_count=0
+  max_retries=3
+  
+  while [[ ${#FRAMES_TO_PROCESS[@]} -gt 0 ]] && [[ $retry_count -lt $max_retries ]]; do
+    echo "Processing ${#FRAMES_TO_PROCESS[@]} frames (attempt $((retry_count + 1))/$max_retries)"
     
-    # Wait for all background jobs in this batch to complete
-    wait
+    # Clear previous results
+    > "/tmp/video_diffusion_results_$$"
+    > "/tmp/video_diffusion_failures_$$"
     
-    # Clean up semaphore
-    exec 3>&-
+    # Process current batch of frames
+    process_frames_batch "${FRAMES_TO_PROCESS[@]}"
     
-    # Count processed frames
+    # Count processed and failed frames
+    processed_this_round=0
+    failed_this_round=0
+    
     if [[ -f "/tmp/video_diffusion_results_$$" ]]; then
-      BATCH_PROCESSED=$(wc -l < "/tmp/video_diffusion_results_$$" 2>/dev/null || echo 0)
-      PROCESSED_COUNT=$BATCH_PROCESSED
+      processed_this_round=$(wc -l < "/tmp/video_diffusion_results_$$" 2>/dev/null || echo 0)
+      PROCESSED_COUNT=$((PROCESSED_COUNT + processed_this_round))
     fi
     
-    echo "Batch completed. Processed: $PROCESSED_COUNT/$TOTAL_TO_PROCESS frames so far"
-    echo ""
+    if [[ -f "/tmp/video_diffusion_failures_$$" ]]; then
+      failed_this_round=$(wc -l < "/tmp/video_diffusion_failures_$$" 2>/dev/null || echo 0)
+      
+      # Extract failed frame numbers for retry
+      FAILED_FRAMES=()
+      while read -r line; do
+        if [[ "$line" =~ FAILED:([0-9]+) ]]; then
+          failed_frame="${BASH_REMATCH[1]}"
+          FAILED_FRAMES+=("$failed_frame")
+          echo "$failed_frame:$((retry_count + 1))" >> "$RETRY_ATTEMPTS"
+        fi
+      done < "/tmp/video_diffusion_failures_$$"
+    fi
+    
+    echo "Round $((retry_count + 1)) completed: $processed_this_round processed, $failed_this_round failed"
+    
+    # Prepare for next retry if needed
+    if [[ ${#FAILED_FRAMES[@]} -gt 0 ]] && [[ $retry_count -lt $((max_retries - 1)) ]]; then
+      echo "Requeuing ${#FAILED_FRAMES[@]} failed frames for retry..."
+      FRAMES_TO_PROCESS=("${FAILED_FRAMES[@]}")
+      ((retry_count++))
+      
+      # Add delay before retry to let servers recover
+      echo "Waiting 10 seconds before retry..."
+      sleep 10
+    else
+      break
+    fi
   done
   
-  # Clean up results file
-  rm -f "/tmp/video_diffusion_results_$$"
+  # Final failed frames handling
+  if [[ ${#FAILED_FRAMES[@]} -gt 0 ]]; then
+    echo "⚠️  Warning: ${#FAILED_FRAMES[@]} frames failed after $max_retries attempts:"
+    printf "   Frame %s\n" "${FAILED_FRAMES[@]}"
+    echo "These frames may need manual reprocessing or server troubleshooting."
+  fi
+  
+  # Clean up temporary files
+  rm -f "/tmp/video_diffusion_results_$$" "/tmp/video_diffusion_failures_$$" "$RETRY_ATTEMPTS"
 fi
 
 echo "=== Processing Complete ==="
-echo "Total frames processed: $PROCESSED_COUNT"
+echo "Total frames processed: $PROCESSED_COUNT out of $TOTAL_TO_PROCESS"
+if [[ ${#FAILED_FRAMES[@]} -gt 0 ]]; then
+  echo "Failed frames: ${#FAILED_FRAMES[@]} (see warnings above)"
+fi
 echo "Output directory: $SAVE_TO_DISK_PATH"
 
 # Clean up temporary frames unless user wants to keep them
