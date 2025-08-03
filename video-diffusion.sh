@@ -32,6 +32,10 @@ usage() {
   echo "       [--max-concurrent NUM] (max concurrent API requests, default: 12)"
   echo "       [--sequential] (disable parallel processing, process frames one by one)"
   echo "       [--batch-size NUM] (number of frames to process in each batch, default: 24)"
+  echo "       [--hybrid-processing] (enable GPU+CPU hybrid processing for maximum speed)"
+  echo "       [--cpu-fallback] (enable CPU fallback when GPU is overloaded)"
+  echo "       [--gpu-ports 'PORT1,PORT2'] (GPU server ports, default: 9000)"
+  echo "       [--cpu-ports 'PORT1,PORT2'] (CPU server ports, default: 9010)"
   echo "       [--smoothing METHOD] (temporal smoothing: 'init', 'optical', 'temporal', 'none', default: none)"
   echo "       [--smoothing-strength FLOAT] (smoothing strength 0.0-1.0, default: 0.3)"
   echo "       [--debug] (enable debug output for troubleshooting)"
@@ -156,6 +160,78 @@ apply_temporal_filtering() {
   echo "✓ Temporal filtering applied"
 }
 
+# Hybrid GPU+CPU Processing Functions
+
+# Function to check server availability
+check_server() {
+  local port="$1"
+  local timeout="${2:-5}"
+  
+  if timeout "$timeout" curl -s "http://localhost:$port/ping" >/dev/null 2>&1; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+# Function to get server load (basic implementation)
+get_server_load() {
+  local port="$1"
+  
+  # Simple load check - count active connections or use ping response time
+  local response_time=$(curl -w "%{time_total}" -s -o /dev/null "http://localhost:$port/ping" 2>/dev/null || echo "999")
+  
+  # Convert to load score (lower is better)
+  if (( $(echo "$response_time < 0.1" | bc -l) )); then
+    echo "1"  # Low load
+  elif (( $(echo "$response_time < 0.5" | bc -l) )); then
+    echo "2"  # Medium load
+  else
+    echo "3"  # High load
+  fi
+}
+
+# Function to select best available server
+select_best_server() {
+  local gpu_ports_array=(${GPU_PORTS//,/ })
+  local cpu_ports_array=(${CPU_PORTS//,/ })
+  local best_port=""
+  local best_load=999
+  local best_type=""
+  
+  # Check GPU servers first (preferred)
+  for port in "${gpu_ports_array[@]}"; do
+    if check_server "$port" 2; then
+      local load=$(get_server_load "$port")
+      if [[ "$load" -lt "$best_load" ]]; then
+        best_port="$port"
+        best_load="$load"
+        best_type="GPU"
+      fi
+    fi
+  done
+  
+  # If hybrid processing enabled or CPU fallback needed, check CPU servers
+  if [[ "$HYBRID_PROCESSING" == true ]] || [[ "$CPU_FALLBACK" == true && "$best_load" -gt 2 ]]; then
+    for port in "${cpu_ports_array[@]}"; do
+      if check_server "$port" 2; then
+        local load=$(get_server_load "$port")
+        if [[ "$load" -lt "$best_load" ]] || [[ "$HYBRID_PROCESSING" == true && "$load" -le 2 ]]; then
+          best_port="$port"
+          best_load="$load"
+          best_type="CPU"
+        fi
+      fi
+    done
+  fi
+  
+  if [[ -n "$best_port" ]]; then
+    echo "$best_port:$best_type"
+  else
+    echo "9000:GPU"  # Fallback to default
+  fi
+}
+
 # Default values
 FPS=1
 MODEL="sd-v1-5.safetensors"
@@ -174,6 +250,10 @@ START_FRAME=1
 END_FRAME=""
 SMOOTHING="none"
 SMOOTHING_STRENGTH=0.3
+HYBRID_PROCESSING=false
+CPU_FALLBACK=false
+GPU_PORTS="9000"
+CPU_PORTS="9010"
 SEED=""
 PARALLEL_JOBS=4
 MAX_CONCURRENT_REQUESTS=12
@@ -207,6 +287,10 @@ while [[ "$#" -gt 0 ]]; do
     --max-concurrent) MAX_CONCURRENT_REQUESTS="$2"; shift ;;
     --sequential) SEQUENTIAL=true ;;
     --batch-size) BATCH_SIZE="$2"; shift ;;
+    --hybrid-processing) HYBRID_PROCESSING=true ;;
+    --cpu-fallback) CPU_FALLBACK=true ;;
+    --gpu-ports) GPU_PORTS="$2"; shift ;;
+    --cpu-ports) CPU_PORTS="$2"; shift ;;
     --smoothing) SMOOTHING="$2"; shift ;;
     --smoothing-strength) SMOOTHING_STRENGTH="$2"; shift ;;
     --debug) DEBUG=true ;;
@@ -363,16 +447,64 @@ fi
 mkdir -p "$TEMP_DIR"
 mkdir -p "$SAVE_TO_DISK_PATH"
 
-echo "=== Video Diffusion Processing (Optimized) ==="
+echo "=== Video Diffusion Processing (Hybrid GPU+CPU) ==="
 echo "Video: $VIDEO_PATH"
 echo "Prompt: $PROMPT"
 echo "FPS: $FPS"
 echo "Parallel extraction jobs: $PARALLEL_JOBS"
 echo "Max concurrent API requests: $MAX_CONCURRENT_REQUESTS"
 echo "Batch size: $BATCH_SIZE"
+if [[ "$HYBRID_PROCESSING" == true ]]; then
+  echo "Processing mode: Hybrid GPU+CPU (GPU: $GPU_PORTS, CPU: $CPU_PORTS)"
+elif [[ "$CPU_FALLBACK" == true ]]; then
+  echo "Processing mode: GPU with CPU fallback (GPU: $GPU_PORTS, CPU: $CPU_PORTS)"
+else
+  echo "Processing mode: GPU only (Port: $GPU_PORTS)"
+fi
+if [[ "$SMOOTHING" != "none" ]]; then
+  echo "Temporal smoothing: $SMOOTHING (strength: $SMOOTHING_STRENGTH)"
+fi
 echo "Temporary frames directory: $TEMP_DIR"
 echo "Output directory: $SAVE_TO_DISK_PATH"
 echo "==============================================="
+echo ""
+
+# Check server availability before processing
+echo "Checking server availability..."
+gpu_ports_array=(${GPU_PORTS//,/ })
+cpu_ports_array=(${CPU_PORTS//,/ })
+
+available_gpu_servers=0
+available_cpu_servers=0
+
+for port in "${gpu_ports_array[@]}"; do
+  if check_server "$port" 3; then
+    echo "✓ GPU server available on port $port"
+    ((available_gpu_servers++))
+  else
+    echo "✗ GPU server unavailable on port $port"
+  fi
+done
+
+if [[ "$HYBRID_PROCESSING" == true ]] || [[ "$CPU_FALLBACK" == true ]]; then
+  for port in "${cpu_ports_array[@]}"; do
+    if check_server "$port" 3; then
+      echo "✓ CPU server available on port $port"
+      ((available_cpu_servers++))
+    else
+      echo "✗ CPU server unavailable on port $port"
+    fi
+  done
+fi
+
+total_servers=$((available_gpu_servers + available_cpu_servers))
+if [[ $total_servers -eq 0 ]]; then
+  echo "Error: No Easy Diffusion servers are available!"
+  echo "Please start at least one Easy Diffusion server before proceeding."
+  exit 1
+fi
+
+echo "Total available servers: $total_servers (GPU: $available_gpu_servers, CPU: $available_cpu_servers)"
 echo ""
 
 # Extract frames from video with parallel processing
@@ -455,9 +587,21 @@ process_frame() {
   
   echo "Processing frame $frame_num/$END_FRAME: $frame_file (PID: $$)"
   
+  # Select best available server for hybrid processing
+  local server_info
+  if [[ "$HYBRID_PROCESSING" == true ]] || [[ "$CPU_FALLBACK" == true ]]; then
+    server_info=$(select_best_server)
+    local selected_port="${server_info%%:*}"
+    local server_type="${server_info##*:}"
+    echo "Using $server_type server on port $selected_port for frame $frame_num"
+  else
+    selected_port="9000"
+    server_type="GPU"
+  fi
+  
   # Debug output if enabled
   if [[ "$DEBUG" == true ]]; then
-    echo "DEBUG: Command: bash $EASY_DIFFUSION_CLI --prompt \"$PROMPT\" --model \"$MODEL\" --init-image \"$init_image\" --seed \"$frame_seed\" --save-to-disk-path \"$SAVE_TO_DISK_PATH\" --session_id \"$frame_session_id\""
+    echo "DEBUG: Command: bash $EASY_DIFFUSION_CLI --prompt \"$PROMPT\" --model \"$MODEL\" --init-image \"$init_image\" --seed \"$frame_seed\" --port \"$selected_port\" --save-to-disk-path \"$SAVE_TO_DISK_PATH\" --session_id \"$frame_session_id\""
   fi
   
   # Run easy-diffusion-cli-enhanced.sh with the init image and capture response
@@ -474,6 +618,7 @@ process_frame() {
       --prompt-strength "$prompt_strength_adjusted" \
       --width "$WIDTH" \
       --height "$HEIGHT" \
+      --port "$selected_port" \
       --save-to-disk-path "$SAVE_TO_DISK_PATH" \
       --session_id "$frame_session_id")
     echo "DEBUG: API Response: $api_response"
@@ -489,6 +634,7 @@ process_frame() {
       --prompt-strength "$prompt_strength_adjusted" \
       --width "$WIDTH" \
       --height "$HEIGHT" \
+      --port "$selected_port" \
       --save-to-disk-path "$SAVE_TO_DISK_PATH" \
       --session_id "$frame_session_id" 2>/dev/null)
   fi
@@ -509,10 +655,11 @@ process_frame() {
 }
 
 # Export function and variables for parallel processing
-export -f process_frame
+export -f process_frame select_best_server check_server get_server_load
 export TEMP_DIR PROMPT MODEL SEED NEGATIVE_PROMPT NUM_INFERENCE_STEPS 
 export GUIDANCE_SCALE PROMPT_STRENGTH WIDTH HEIGHT SAVE_TO_DISK_PATH 
-export SESSION_ID EASY_DIFFUSION_CLI END_FRAME
+export SESSION_ID EASY_DIFFUSION_CLI END_FRAME SMOOTHING SMOOTHING_STRENGTH
+export HYBRID_PROCESSING CPU_FALLBACK GPU_PORTS CPU_PORTS DEBUG
 
 # Process frames in parallel or sequential mode
 if [[ "$SEQUENTIAL" == true ]]; then

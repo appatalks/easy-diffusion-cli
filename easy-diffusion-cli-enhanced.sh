@@ -19,6 +19,7 @@ usage() {
   echo "       [--height HEIGHT]" 
   echo "       [--save-to-disk-path PATH]"
   echo "       [--session_id ID]"
+  echo "       [--port PORT] (Easy Diffusion server port, default: 9000)"
   echo "       [--timeout SECONDS] (max time to wait for generation, default: 120)"
   echo "       [--debug] (enable debug output)"
   exit 1
@@ -35,6 +36,7 @@ WIDTH=512
 HEIGHT=512
 SAVE_TO_DISK_PATH="./output/"
 SESSION_ID=$(date '+%Y-%m-%d')
+PORT=9000
 TIMEOUT=120
 DEBUG=false
 
@@ -57,6 +59,7 @@ while [[ "$#" -gt 0 ]]; do
     --height) HEIGHT="$2"; shift ;;
     --save-to-disk-path) SAVE_TO_DISK_PATH="$2"; shift ;;
     --session_id) SESSION_ID="$2"; shift ;;
+    --port) PORT="$2"; shift ;;
     --timeout) TIMEOUT="$2"; shift ;;
     --debug) DEBUG=true ;;
     *) echo "Unknown parameter: $1"; usage ;;
@@ -96,7 +99,7 @@ fi
 mkdir -p "$SAVE_TO_DISK_PATH"
 
 # Define the URL for the Easy Diffusion server
-URL="http://localhost:9000/render"
+URL="http://localhost:$PORT/render"
 
 # Generate the JSON payload dynamically
 if [[ -n "$INIT_IMAGE" ]]; then
@@ -218,7 +221,7 @@ if [[ "$DEBUG" == true ]]; then
 fi
 
 # Poll the stream endpoint to get the result
-STREAM_ENDPOINT="http://localhost:9000$STREAM_URL"
+STREAM_ENDPOINT="http://localhost:$PORT$STREAM_URL"
 START_TIME=$(date +%s)
 RESULT=""
 
