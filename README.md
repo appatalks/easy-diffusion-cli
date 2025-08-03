@@ -1,88 +1,99 @@
 # easy-diffusion-cli
-Advanced CLI for Easy-Diffusion with Hybrid GPU+CPU Processing
+Advanced CLI for Easy-Diffusion with Hybrid GPU+CPU Processing & Temporal Smoothing
 
-## 🚀 Video Workflow with Hybrid Processing (NEW! - Up to 10x Performance)
+## 🚀 Video Workflow with Hybrid Processing & Temporal Smoothing
 
-Transform videos using AI diffusion with intelligent GPU+CPU load balancing, automatic hardware optimization, and advanced temporal smoothing.
+Transform videos using AI diffusion with intelligent GPU+CPU load balancing, automatic hardware optimization, and professional-grade temporal smoothing for flicker-free results.
 
-### 🔥 Beast Mode (High-End Systems: 16+ cores, 64+ GB RAM)
+### 🔥 Quick Start Examples
 
 ```bash
-# Hybrid GPU+CPU processing (automatically balances load)
-./video-diffusion.sh --video "/path/to/video.mp4" --prompt "cyberpunk city neon lights" \
-  
-# CPU fallback for GPU overflow handling
-./video-diffusion.sh --video "/path/to/video.mp4" --prompt "Van Gogh style painting" \
-  --cpu-fallback --multi-gpu --pipeline
+# Basic video transformation with auto-optimization
+./video-diffusion.sh --video "input.mp4" --prompt "watercolor painting"
 
-# Full beast mode with all optimizations
-./video-diffusion.sh --video "/path/to/video.mp4" --prompt "anime style artwork" \
-  --hybrid-processing --pipeline --smoothing init --multi-gpu
+# Hybrid GPU+CPU processing for maximum speed
+./video-diffusion.sh --video "input.mp4" --prompt "cyberpunk city neon lights" \
+  --hybrid-processing
+
+# Professional quality with temporal smoothing
+./video-diffusion.sh --video "input.mp4" --prompt "Van Gogh starry night style" \
+  --smoothing init --smoothing-strength 0.4
+
+# High-end system with all optimizations
+./video-diffusion.sh --video "input.mp4" --prompt "anime style artwork" \
+  --hybrid-processing --smoothing temporal --smoothing-strength 0.3
 ```
 
-### ⚡ Advanced Processing Options
+### ⚡ Hybrid Processing Modes
 
+#### **🎯 GPU+CPU Hybrid Processing** (Recommended for High Performance)
 ```bash
-# Multi-GPU processing with load balancing
-./video-diffusion.sh --video "/path/to/video.mp4" --prompt "watercolor painting" \
-  --multi-gpu --gpu-ports "9000,9001,9002"
+# Automatically balance load between GPU and CPU servers
+./video-diffusion.sh --video "input.mp4" --prompt "digital art masterpiece" \
+  --hybrid-processing --gpu-ports "9000" --cpu-ports "9010"
 
-# CPU-only processing with multiple instances
-./video-diffusion.sh --video "/path/to/video.mp4" --prompt "oil painting" \
-  --cpu-fallback --cpu-ports "9010,9011,9012"
+# Multiple server configuration
+./video-diffusion.sh --video "input.mp4" --prompt "photorealistic rendering" \
+  --hybrid-processing --gpu-ports "9000,9001" --cpu-ports "9010,9011"
+```
 
-# Pipeline processing with overlapped operations
-./video-diffusion.sh --video "/path/to/video.mp4" --prompt "digital art" \
-  --pipeline --hybrid-processing
+#### **🛡️ CPU Fallback Mode** (Reliable Performance)
+```bash
+# GPU with automatic CPU fallback when overloaded
+./video-diffusion.sh --video "input.mp4" --prompt "oil painting style" \
+  --cpu-fallback --gpu-ports "9000" --cpu-ports "9010"
 ```
 
 ### 🎯 Temporal Smoothing for Professional Results
 
+#### **⭐ Init Smoothing** (Recommended - Best Balance)
 ```bash
-# Init-based smoothing (recommended for consistency)
-./video-diffusion.sh --video "/path/to/video.mp4" --prompt "dreamy landscape" \
+# Use previous frame as init image for consistency
+./video-diffusion.sh --video "input.mp4" --prompt "dreamy landscape" \
   --smoothing init --smoothing-strength 0.4
+```
 
-# Optical flow smoothing for motion-heavy videos
-./video-diffusion.sh --video "/path/to/video.mp4" --prompt "flowing water" \
+#### **🌊 Optical Flow Smoothing** (Motion-Heavy Content)
+```bash
+# Optical flow-based frame blending for smooth motion
+./video-diffusion.sh --video "input.mp4" --prompt "flowing water scene" \
   --smoothing optical --smoothing-strength 0.3
+```
 
-# Temporal filtering for maximum frame consistency
-./video-diffusion.sh --video "/path/to/video.mp4" --prompt "peaceful forest" \
+#### **🎬 Temporal Filtering** (Maximum Consistency)
+```bash
+# Multi-frame temporal filtering for film-like quality
+./video-diffusion.sh --video "input.mp4" --prompt "cinematic sequence" \
   --smoothing temporal --smoothing-strength 0.5
 ```
 
 ## 🎯 Performance Features & Hardware Optimization
 
-**🚀 Hybrid GPU+CPU Processing:**
-- **Intelligent Load Balancing**: Automatically switches between GPU and CPU based on utilization
-- **Multi-GPU Support**: Distributes load across multiple GPU instances (ports 9000+)
-- **CPU Fallback**: Seamless fallback to CPU when GPU is overwhelmed (>85% utilization)
-- **Pipeline Processing**: Overlapped frame extraction, processing, and video assembly
+### **🚀 Hybrid Processing Architecture**
+- **GPU+CPU Load Balancing**: Automatically distributes work between GPU and CPU servers
+- **Intelligent Server Selection**: Real-time load monitoring and optimal server routing
+- **Automatic Failover**: Seamless CPU fallback when GPU servers are overloaded
+- **Multi-Instance Support**: Configure multiple GPU and CPU server ports
+- **Hardware Auto-Detection**: Optimizes settings based on available CPU cores and RAM
 
-**⚡ Automatic Hardware Detection:**
-- **Beast Mode**: 16+ cores, 64+ GB RAM → 80+ concurrent requests, 61 batch size
-- **High-End**: 16+ cores, 32+ GB RAM → 60 concurrent requests, dynamic batching
-- **High-Performance**: 12+ cores, 16+ GB RAM → 40 concurrent requests
-- **Standard**: 8+ cores, 8+ GB RAM → 24 concurrent requests
-
-**🧠 CPU Optimization (16-core/32-thread Systems):**
-- **Target Utilization**: 75-80% (24 of 32 threads active)
-- **System Overhead**: 20-25% reserved for OS and other processes
-- **Frame Extraction**: 24 parallel jobs for video preprocessing
-- **CPU Processing**: 24 concurrent workers for AI inference
-
-**🎬 Advanced Features:**
-- **Auto Frame Rate Detection**: Matches source video FPS automatically
+### **🎬 Advanced Video Processing Features**
+- **Auto Frame Rate Detection**: Matches source video FPS automatically or customize
 - **Smart Video Naming**: Uses first 3 prompt words + options + timestamp
-- **Temporal Smoothing**: Reduces frame-to-frame inconsistency
-- **Debug Mode**: Comprehensive debugging and performance monitoring
+- **Parallel Frame Extraction**: Multi-threaded ffmpeg processing
+- **Batch Processing**: Intelligent batching for optimal throughput
+- **Hardware-Accelerated Encoding**: NVENC, VAAPI, or optimized software encoding
 
-**📊 Performance Improvements vs Original:**
-- **6x Faster Frame Extraction**: 4 → 24 parallel jobs
-- **3x More CPU Workers**: 8 → 24 concurrent processes
-- **10x Faster Processing**: Combined GPU+CPU hybrid processing
-- **40x Faster Delays**: 2s → 0.05s between requests
+### **🎯 Temporal Smoothing Technology**
+- **Init Smoothing**: Uses previous generated frame as initialization (best balance)
+- **Optical Flow**: FFmpeg-based frame blending for motion consistency
+- **Temporal Filtering**: Multi-frame weighted averaging for maximum smoothness
+- **Configurable Strength**: Adjustable smoothing intensity (0.0-1.0)
+
+### **🔧 Performance Optimizations**
+- **Automatic Hardware Tuning**: Detects CPU cores and RAM for optimal settings
+- **Concurrent Request Management**: Semaphore-based parallel processing
+- **Minimal Request Delays**: Optimized timing (0.005-0.05s) based on hardware
+- **Server Health Monitoring**: Real-time availability and load checking
 
 ## 🎨 Smoothing Methods
 
@@ -97,7 +108,7 @@ Transform videos using AI diffusion with intelligent GPU+CPU load balancing, aut
 - `--smoothing none`: No smoothing (fastest, but may flicker)
 - `--smoothing-strength 0.0-1.0`: Adjust smoothing intensity (default: 0.3)
 
-## 🎮 Video Processing Complete Options
+## 🎮 Complete Command Reference
 
 ```bash
 Usage: video-diffusion.sh --video "/path/to/video.mp4" --prompt "Your prompt"
@@ -106,25 +117,29 @@ Required arguments:
     --video "/path/to/video.mp4"   # Input video file
     --prompt "Your prompt here"    # AI transformation prompt
 
-Performance & Hardware:
+🚀 Performance & Processing:
     [--hybrid-processing]          # Enable GPU+CPU hybrid processing
     [--cpu-fallback]              # Enable CPU fallback when GPU overloaded
-    [--multi-gpu]                 # Enable multi-GPU processing
-    [--pipeline]                  # Enable pipeline optimization
     [--gpu-ports "9000,9001"]     # GPU server ports (comma-separated)
     [--cpu-ports "9010,9011"]     # CPU server ports (comma-separated)
     [--max-concurrent NUM]        # Max concurrent API requests (auto-detected)
     [--parallel-jobs NUM]         # Parallel frame extraction jobs (auto-detected)
     [--batch-size NUM]            # Frames per batch (auto-detected)
+    [--sequential]                # Disable parallel processing
+    [--delay SECONDS]             # Delay between requests (0.005-0.05)
 
-Video & Quality:
+🎯 Temporal Smoothing:
+    [--smoothing METHOD]          # Smoothing: init|optical|temporal|none
+    [--smoothing-strength FLOAT]  # Smoothing intensity 0.0-1.0 (default: 0.3)
+
+🎬 Video & Frame Control:
     [--fps FPS]                   # Frames per second (auto-detected from source)
     [--start-frame NUM]           # Start processing from frame number
     [--end-frame NUM]             # Stop at frame number
-    [--smoothing METHOD]          # Temporal smoothing: init|optical|temporal|none
-    [--smoothing-strength FLOAT]  # Smoothing intensity 0.0-1.0 (default: 0.3)
+    [--keep-frames]               # Preserve extracted frames
+    [--no-video]                  # Generate images only, skip video creation
 
-AI Parameters:
+🎨 AI Generation Parameters:
     [--model MODEL]               # AI model (default: sd-v1-5.safetensors)
     [--seed SEED]                 # Random seed for reproducible results
     [--negative-prompt "TEXT"]    # What to avoid in generation
@@ -134,96 +149,156 @@ AI Parameters:
     [--width WIDTH]               # Output width (default: 512)
     [--height HEIGHT]             # Output height (default: 512)
 
-Output & Debug:
+📁 Output & Debug:
     [--save-to-disk-path PATH]    # Output directory (default: ./output/)
     [--session_id ID]             # Session identifier
     [--temp-dir PATH]             # Temporary frames directory
-    [--keep-frames]               # Preserve extracted frames
-    [--no-video]                  # Generate images only, skip video creation
-    [--sequential]                # Disable parallel processing
-    [--debug]                     # Enable debug output and monitoring
-    [--delay SECONDS]             # Delay between requests (default: 0.05)
+    [--debug]                     # Enable comprehensive debug output
 ```
+
+### 🎯 Smoothing Methods Explained
+
+| Method | Description | Best For | Performance |
+|--------|-------------|----------|-------------|
+| **init** | Uses previous generated frame as init image | General use, best balance | ⭐⭐⭐⭐⭐ |
+| **optical** | Optical flow-based frame blending | Motion-heavy content | ⭐⭐⭐⭐ |
+| **temporal** | Multi-frame temporal filtering | Maximum consistency | ⭐⭐⭐ |
+| **none** | No smoothing (fastest) | Testing, speed priority | ⭐⭐⭐⭐⭐ |
 ## 🚀 Quick Start Examples
 
-### Basic Video Transformation
+### **Basic Usage**
 ```bash
 # Simple transformation with auto-optimization
 ./video-diffusion.sh --video "input.mp4" --prompt "watercolor painting"
+
+# Test with limited frames (recommended for first run)
+./video-diffusion.sh --video "input.mp4" --prompt "Van Gogh style" --end-frame 10
 ```
 
-### High-Performance Processing
+### **Hybrid Processing (Recommended)**
 ```bash
-# Beast mode with hybrid processing for 16-core systems
+# GPU+CPU hybrid for maximum performance
 ./video-diffusion.sh --video "input.mp4" --prompt "cyberpunk city" \
-  --hybrid-processing --pipeline --smoothing init
+  --hybrid-processing
+
+# With temporal smoothing for professional quality
+./video-diffusion.sh --video "input.mp4" --prompt "anime artwork" \
+  --hybrid-processing --smoothing init --smoothing-strength 0.4
 ```
 
-### Professional Workflow
+### **High-Quality Production**
 ```bash
-# Multi-GPU with temporal smoothing for production work
-./video-diffusion.sh --video "input.mp4" --prompt "cinematic film noir" \
-  --multi-gpu --gpu-ports "9000,9001,9002" --smoothing temporal \
-  --smoothing-strength 0.4 --fps 24
+# Maximum quality with temporal filtering
+./video-diffusion.sh --video "input.mp4" --prompt "cinematic masterpiece" \
+  --smoothing temporal --smoothing-strength 0.5 --num-inference-steps 50
+
+# Professional workflow with custom settings
+./video-diffusion.sh --video "input.mp4" --prompt "oil painting portrait" \
+  --hybrid-processing --smoothing init --fps 24 --guidance-scale 8.0
 ```
 
-### Batch Processing Script
+### **Performance Optimization**
 ```bash
-# Process multiple images with consistent settings
-for i in $(stat path/to/*jpg | awk '{print $2}' | grep jpg); do 
-  bash easy-diffusion-cli-enhanced.sh --prompt "artistic masterpiece" \
-    --prompt-strength "0.4" --session_id batch_001 \
-    --num-inference-steps 46 --guidance-scale 7.5 \
-    --save-to-disk-path "/output/path/" --init-image "$i" \
-    --seed 2555259 --width 768 --height 512
-  sleep 2
-done
+# Speed priority (testing/previews)
+./video-diffusion.sh --video "input.mp4" --prompt "sketch style" \
+  --fps 1 --num-inference-steps 25 --end-frame 20
+
+# Multi-server configuration for maximum throughput
+./video-diffusion.sh --video "input.mp4" --prompt "digital art" \
+  --hybrid-processing --gpu-ports "9000,9001" --cpu-ports "9010,9011"
 ```
+
 
 ## 📋 Prerequisites & Setup
 
-**Required:**
+### **Required Dependencies**
 - [Easy Diffusion](https://easydiffusion.github.io/) server running on localhost:9000
-- `ffmpeg` for video processing
-- `jq` for JSON parsing
-- `curl` for API requests
+- `ffmpeg` for video processing and encoding
+- `jq` for JSON parsing and API responses
+- `curl` for HTTP requests to Easy Diffusion API
 - `bash` 4.0+ shell
 
-**Optional for Enhanced Performance:**
-- Multiple Easy Diffusion instances on different ports (9000, 9001, 9002...)
-- CPU-only Easy Diffusion instances on ports 9010-9013
-- `nvidia-smi` for GPU monitoring (NVIDIA systems)
-- `bc` for advanced smoothing calculations
-- High-end hardware (16+ cores, 64+ GB RAM) for beast mode
+### **Optional for Enhanced Performance**
+- **CPU Server**: Easy Diffusion instance on port 9010 for hybrid processing
+- **Multiple GPUs**: Additional GPU servers on ports 9001, 9002, etc.
+- **System Tools**: `bc` for smoothing calculations, `nvidia-smi` for GPU monitoring
+- **High-end Hardware**: 16+ cores, 32+ GB RAM for maximum concurrent processing
 
-**Installation:**
+### **Installation**
 ```bash
 # Ubuntu/Debian
+sudo apt-get update
 sudo apt-get install ffmpeg jq curl bc
 
 # Make scripts executable
 chmod +x video-diffusion.sh easy-diffusion-cli-enhanced.sh
+
+# Verify Easy Diffusion server is running
+curl http://localhost:9000/ping
 ```
 
-## 🎯 Performance Tips
+### **Server Setup for Hybrid Processing**
+```bash
+# GPU server (default): localhost:9000
+# CPU server (recommended): localhost:9010
+# Additional servers: localhost:9001, 9011, etc.
 
-**For Maximum Speed:**
-1. Use `--hybrid-processing --pipeline` for overlapped operations
-2. Enable multi-GPU with `--multi-gpu --gpu-ports "9000,9001,9002"`
-3. Set up CPU fallback instances on ports 9010-9013
-4. Use `--smoothing init` for the best quality/speed balance
-5. Process at lower FPS first (`--fps 1`) for testing
+# Test server connectivity
+./video-diffusion.sh --video "test.mp4" --prompt "test" --end-frame 1 --debug
+```
 
-**For Best Quality:**
-1. Use `--smoothing temporal --smoothing-strength 0.5`
-2. Increase inference steps: `--num-inference-steps 50`
-3. Use higher guidance scale: `--guidance-scale 8.0`
-4. Process at source frame rate with `--fps` auto-detection
+## 🎯 Performance Tips & Best Practices
 
-**For System Stability:**
-1. Monitor with `--debug` flag for performance insights
-2. Start with `--end-frame 10` for testing
-3. Use `--sequential` if parallel processing causes issues
-4. Reserve CPU overhead by not forcing max concurrency
+### **🚀 For Maximum Speed**
+1. **Use hybrid processing**: `--hybrid-processing` with GPU+CPU servers
+2. **Start with low FPS**: `--fps 1` for testing, then increase
+3. **Limit frames for testing**: `--end-frame 20` before full processing
+4. **Enable debug mode**: `--debug` to monitor performance bottlenecks
+5. **Use init smoothing**: `--smoothing init` for best speed/quality balance
+
+### **🎬 For Best Quality**
+1. **Use temporal smoothing**: `--smoothing temporal --smoothing-strength 0.4`
+2. **Increase inference steps**: `--num-inference-steps 50-75`
+3. **Higher guidance scale**: `--guidance-scale 8.0` for better prompt adherence
+4. **Match source frame rate**: Let auto-detection set FPS or use `--fps 24/30`
+5. **Process at full resolution**: Use source video resolution or higher
+
+### **🛡️ For System Stability**
+1. **Monitor with debug**: `--debug` flag shows real-time processing status
+2. **Start small**: Use `--end-frame 10` for initial tests
+3. **Check server health**: Verify all servers respond before large jobs
+4. **Use CPU fallback**: `--cpu-fallback` for automatic error recovery
+5. **Reserve CPU overhead**: Don't max out concurrent requests on lower-end systems
+
+### **⚡ Hardware-Specific Recommendations**
+
+| System Type | Recommended Settings | Example Command |
+|-------------|---------------------|-----------------|
+| **Entry Level** (4-8 cores) | Single GPU, conservative settings | `--max-concurrent 4 --batch-size 8` |
+| **Mid Range** (8-16 cores) | GPU + CPU fallback | `--cpu-fallback --max-concurrent 8` |
+| **High End** (16+ cores) | Full hybrid processing | `--hybrid-processing --max-concurrent 20` |
+| **Workstation** (32+ cores) | Multi-server setup | `--hybrid-processing --gpu-ports "9000,9001" --cpu-ports "9010,9011"` |
 
 See [VIDEO_WORKFLOW.md](VIDEO_WORKFLOW.md) for detailed workflow documentation.
+
+---
+
+## 🔄 Recent Updates
+
+**v2.0 - Hybrid Processing & Temporal Smoothing**
+- ✨ Added GPU+CPU hybrid processing with intelligent load balancing
+- 🎯 Implemented temporal smoothing (init, optical, temporal methods)
+- 🚀 Enhanced server management with automatic failover
+- ⚡ Optimized performance with hardware auto-detection
+- 📊 Added comprehensive debugging and monitoring
+- 🎬 Improved video encoding with hardware acceleration
+
+**Features Added:**
+- `--hybrid-processing` and `--cpu-fallback` modes
+- `--smoothing` with configurable strength
+- Real-time server health monitoring
+- Multi-server port configuration
+- Enhanced error handling and recovery
+- Professional-grade temporal consistency
+
+For legacy documentation, see previous commits or the `main` branch.
