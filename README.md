@@ -38,14 +38,14 @@ Transform videos using AI diffusion with intelligent GPU+CPU load balancing, aut
 
 ### 🎯 Temporal Smoothing for Professional Results
 
-#### **⭐ Init Smoothing** (Recommended - Best Balance)
+#### **⭐ Init Smoothing** (Best Balance - Single Threaded)
 ```bash
 # Use previous frame as init image for consistency
 ./video-diffusion.sh --video "input.mp4" --prompt "dreamy landscape" \
   --smoothing init --smoothing-strength 0.4
 ```
 
-#### **🌊 Optical Flow Smoothing** (Motion-Heavy Content)
+#### **🌊 Optical Flow Smoothing** (Recommended - Motion-Heavy Content)
 ```bash
 # Optical flow-based frame blending for smooth motion
 ./video-diffusion.sh --video "input.mp4" --prompt "flowing water scene" \
@@ -208,6 +208,8 @@ Required arguments:
 ## 📋 Prerequisites & Setup
 
 ### **Required Dependencies**
+See [requirements.txt](requirements.txt) for complete system dependency list.
+
 - [Easy Diffusion](https://easydiffusion.github.io/) server running on localhost:9000
 - `ffmpeg` for video processing and encoding
 - `jq` for JSON parsing and API responses

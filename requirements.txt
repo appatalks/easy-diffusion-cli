@@ -1,0 +1,25 @@
+# Easy Diffusion CLI - System Requirements
+# ========================================
+
+# Required System Dependencies
+ffmpeg>=4.0         # Video processing and frame extraction
+jq>=1.6             # JSON parsing for API responses
+curl>=7.0           # HTTP requests to Easy Diffusion API
+bc                  # Mathematical calculations for temporal smoothing
+bash>=4.0           # Shell environment
+
+# Standard Linux utilities (usually pre-installed)
+coreutils           # base64 encoding
+util-linux          # nproc command
+procps              # free command
+findutils           # find command
+
+# External Service Required
+# Easy Diffusion Server running on localhost:9000
+# Documentation: https://easydiffusion.github.io/
+
+# Installation
+# Ubuntu/Debian: sudo apt-get install ffmpeg jq curl bc
+# CentOS/RHEL:   sudo dnf install ffmpeg jq curl bc
+# Arch Linux:    sudo pacman -S ffmpeg jq curl bc
+# macOS:         brew install ffmpeg jq curl bc
